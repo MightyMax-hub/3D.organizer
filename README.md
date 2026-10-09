@@ -11,7 +11,7 @@ chmod +x start.sh
 ./start.sh
 ```
 
-Open `http://<pi-address>:5005` from a device on the same network. Allow TCP port 5005 through the Pi firewall if one is enabled. To keep it available after reboot, run it as a systemd service. Set a private `SECRET_KEY` environment variable before exposing the app beyond a trusted local network.
+Open `http://<pi-address>:5005` from a device on the same network. Allow TCP port 5010 through the Pi firewall if one is enabled. To keep it available after reboot, run it as a systemd service. Set a private `SECRET_KEY` environment variable before exposing the app beyond a trusted local network.
 
 There is currently no login screen. Keep the service on a trusted private network and do not forward its port to the public internet; orders include customer addresses and financial records.
 
