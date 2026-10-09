@@ -113,6 +113,7 @@ def init_database():
                 number INTEGER NOT NULL,
                 date TEXT NOT NULL,
                 platform TEXT NOT NULL DEFAULT '',
+                company_name TEXT NOT NULL DEFAULT '',
                 customer_name TEXT NOT NULL DEFAULT '',
                 street TEXT NOT NULL DEFAULT '',
                 postal_code TEXT NOT NULL DEFAULT '',
@@ -221,6 +222,8 @@ def init_database():
             column["name"]
             for column in connection.execute("PRAGMA table_info(sales)").fetchall()
         }
+        if "company_name" not in sale_columns:
+            connection.execute("ALTER TABLE sales ADD COLUMN company_name TEXT NOT NULL DEFAULT ''")
         if "shipping_date" not in sale_columns:
             connection.execute("ALTER TABLE sales ADD COLUMN shipping_date TEXT NOT NULL DEFAULT ''")
         connection.execute(

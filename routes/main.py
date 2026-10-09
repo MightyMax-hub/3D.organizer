@@ -268,6 +268,8 @@ def dashboard():
             COALESCE((SELECT SUM(COALESCE((SELECT SUM(si.quantity*si.item_price) FROM sale_items si WHERE si.sale_id=s.id), s.quantity*s.item_price)) FROM sales s WHERE s.year = y.year), 0) AS income
             FROM book_years y ORDER BY y.year DESC"""
         ).fetchall()
+        overall_income = sum(item["income"] for item in totals)
+        overall_expenses = sum(item["expenses"] for item in totals)
         models = connection.execute(
             """SELECT m.*,
             COALESCE((SELECT SUM(si.quantity) FROM sale_items si WHERE si.model_id=m.id),0) +
@@ -288,7 +290,8 @@ def dashboard():
     return render_template("dashboard.html", year=current_year, years=available_years,
                            income=sales, expenses=expenses, profit=sales - expenses,
                            filament_kg=filament[0], filament_cost=filament[1],
-                           top_groups=top_groups, totals=totals, models=model_overview)
+                           top_groups=top_groups, totals=totals, models=model_overview,
+                           overall_income=overall_income, overall_expenses=overall_expenses)
 
 
 @main.route("/uploads/<path:filename>")
@@ -769,6 +772,18 @@ def edit_expense(expense_id):
                        error=request.method == "POST")
 
 
+@main.post("/expenses/<int:expense_id>/delete")
+def delete_expense(expense_id):
+    with database() as connection:
+        expense = connection.execute("SELECT year FROM expenses WHERE id=?", (expense_id,)).fetchone()
+        if expense is None:
+            abort(404)
+        connection.execute("DELETE FROM expenses WHERE id=?", (expense_id,))
+        year = expense["year"]
+    flash("Ausgabe gelöscht.", "success")
+    return redirect(url_for("main.expenses", year=year))
+
+
 @main.post("/groups/new")
 def new_group():
     name = request.form.get("name", "").strip()
@@ -841,11 +856,12 @@ def create_sale(year):
                 raise ValueError
             first_model, first_quantity, first_material, first_printer, first_price = items[0]
             connection.execute(
-                """INSERT INTO sales (year, number, date, platform, customer_name, street, postal_code, city,
+                """INSERT INTO sales (year, number, date, platform, company_name, customer_name, street, postal_code, city,
                 model_id, quantity, material_id, printer_id, item_price, shipping_method_id, shipping_price,
-                packaging_cost, note, shipping_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                packaging_cost, note, shipping_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (year, number, sale_date.isoformat(), request.form.get("platform", "").strip(),
-                 request.form.get("customer_name", "").strip(), request.form.get("street", "").strip(),
+                 request.form.get("company_name", "").strip(), request.form.get("customer_name", "").strip(),
+                 request.form.get("street", "").strip(),
                  request.form.get("postal_code", "").strip(), request.form.get("city", "").strip(),
                 first_model, first_quantity, first_material, first_printer, first_price, shipping_id, shipping_price, packaging,
                  request.form.get("note", "").strip(), shipping_date),
@@ -886,7 +902,8 @@ def new_sale(year):
             for model in models
         }
         known_customers = connection.execute(
-            "SELECT DISTINCT customer_name FROM sales WHERE TRIM(customer_name)<>'' ORDER BY customer_name COLLATE NOCASE"
+            """SELECT company_name, customer_name, street, postal_code, city FROM sales
+            WHERE TRIM(customer_name)<>'' ORDER BY date DESC, id DESC"""
         ).fetchall()
     return render_template("sale_form.html", year=year, models=models, materials=material_list,
                            printers=printer_list, shipping=shipping, next_number=next_number,
@@ -952,11 +969,12 @@ def edit_sale(sale_id):
             ).fetchall()
             first_model, first_quantity, first_material, first_printer, first_price = submitted_items[0]
             connection.execute(
-                """UPDATE sales SET number=?, date=?, shipping_date=?, platform=?, customer_name=?, street=?,
+                """UPDATE sales SET number=?, date=?, shipping_date=?, platform=?, company_name=?, customer_name=?, street=?,
                 postal_code=?, city=?, model_id=?, quantity=?, material_id=?, printer_id=?, item_price=?,
                 shipping_method_id=?, shipping_price=?, packaging_cost=?, note=? WHERE id=?""",
                 (number, sale_date.isoformat(), shipping_date, request.form.get("platform", "").strip(),
-                 request.form.get("customer_name", "").strip(), request.form.get("street", "").strip(),
+                 request.form.get("company_name", "").strip(), request.form.get("customer_name", "").strip(),
+                 request.form.get("street", "").strip(),
                  request.form.get("postal_code", "").strip(), request.form.get("city", "").strip(),
                  first_model, first_quantity, first_material, first_printer, first_price, shipping_id,
                  shipping_price, packaging, request.form.get("note", "").strip(), sale_id),
@@ -988,7 +1006,8 @@ def edit_sale(sale_id):
             for material_id in material_ids for printer_id in printer_ids
         } for model in models}
         known_customers = connection.execute(
-            "SELECT DISTINCT customer_name FROM sales WHERE TRIM(customer_name)<>'' ORDER BY customer_name COLLATE NOCASE"
+            """SELECT company_name, customer_name, street, postal_code, city FROM sales
+            WHERE TRIM(customer_name)<>'' ORDER BY date DESC, id DESC"""
         ).fetchall()
         next_number = connection.execute(
             "SELECT COALESCE(MAX(number),0)+1 FROM sales WHERE year=?", (sale["year"],)
@@ -1055,8 +1074,27 @@ def shipping_methods(year):
             flash("Bitte Namen und gültigen Preis eingeben.", "error")
         else:
             with database() as connection:
-                connection.execute("INSERT INTO shipping_methods (year,name,price) VALUES (?,?,?) ON CONFLICT(year,name) DO UPDATE SET price=excluded.price",
-                                   (year, name, price))
+                shipping_id = request.form.get("shipping_id", type=int)
+                if shipping_id:
+                    shipping = connection.execute(
+                        "SELECT id FROM shipping_methods WHERE id=? AND year=?", (shipping_id, year)
+                    ).fetchone()
+                    if shipping is None:
+                        abort(404)
+                    duplicate = connection.execute(
+                        "SELECT 1 FROM shipping_methods WHERE year=? AND name=? AND id<>?",
+                        (year, name, shipping_id),
+                    ).fetchone()
+                    if duplicate:
+                        flash("Eine Versandart mit diesem Namen gibt es in diesem Jahr bereits.", "error")
+                    else:
+                        connection.execute(
+                            "UPDATE shipping_methods SET name=?, price=? WHERE id=?",
+                            (name, price, shipping_id),
+                        )
+                else:
+                    connection.execute("INSERT INTO shipping_methods (year,name,price) VALUES (?,?,?) ON CONFLICT(year,name) DO UPDATE SET price=excluded.price",
+                                       (year, name, price))
         return redirect(url_for("main.shipping_methods", year=year))
     with database() as connection:
         rows = connection.execute("SELECT * FROM shipping_methods WHERE year=? ORDER BY name", (year,)).fetchall()
@@ -1068,6 +1106,7 @@ def delete_shipping(shipping_id):
     with database() as connection:
         row = connection.execute("SELECT year FROM shipping_methods WHERE id=?", (shipping_id,)).fetchone()
         if row:
+            connection.execute("UPDATE sales SET shipping_method_id=NULL WHERE shipping_method_id=?", (shipping_id,))
             connection.execute("DELETE FROM shipping_methods WHERE id=?", (shipping_id,))
             year = row["year"]
         else:
@@ -1304,7 +1343,7 @@ def invoice(sale_id):
         pdf.setFont("Helvetica", font_size)
         pdf.drawRightString(width - 50, vendor_y, line)
         vendor_y -= font_size + 4
-    address_lines = (sale["customer_name"], sale["street"], f"{sale['postal_code']} {sale['city']}".strip())
+    address_lines = (sale["company_name"], sale["customer_name"], sale["street"], f"{sale['postal_code']} {sale['city']}".strip())
     pdf.setFont("Helvetica", 10)
     buyer_y = height - 250
     for line_index, line in enumerate(address_lines):

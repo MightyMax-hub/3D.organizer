@@ -184,6 +184,12 @@
             </strong>
         </div>
         {% endfor %}
+        <div class="year-row year-total-row">
+            <strong>INSGESAMT</strong>
+            <strong>{{ overall_income|euro }}</strong>
+            <strong>{{ overall_expenses|euro }}</strong>
+            <strong class="{% if overall_income-overall_expenses < 0 %}negative{% else %}positive{% endif %}">{{ (overall_income-overall_expenses)|euro }}</strong>
+        </div>
     </div>
 </div>
 <section class="panel model-summary">

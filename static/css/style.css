@@ -227,6 +227,7 @@ textarea { resize: vertical; line-height: 1.5; }
 .transaction-main small, .transaction-value small { color: var(--muted); font-size: 10px; }
 .transaction-main p { margin: 3px 0 0; color: var(--soft); font-size: 10px; }
 .expense-edit-link { display: inline-block; margin-top: 4px; }
+.expense-delete-form button { padding: 0; border: 0; color: var(--red); background: transparent; cursor: pointer; text-align: left; }
 .transaction-value { display: grid; justify-items: end; gap: 3px; font: 11px var(--mono); white-space: nowrap; }
 .expense-editor { max-width: 700px; }
 .form-stack { display: grid; gap: 13px; }

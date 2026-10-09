@@ -68,6 +68,18 @@ if (saleItems) {
     const profitOutput = document.querySelector('[data-live-profit]');
     const defaults = window.saleDefaults || {};
     const costs = window.saleCosts || {};
+    const customerName = document.querySelector('[name="customer_name"]');
+    const knownCustomers = document.querySelector('#known-customer-names');
+
+    customerName.addEventListener('input', () => {
+        const match = [...knownCustomers.options].find((option) =>
+            option.value.trim().toLocaleLowerCase() === customerName.value.trim().toLocaleLowerCase());
+        if (!match) return;
+        document.querySelector('[name="company_name"]').value = match.dataset.company || '';
+        document.querySelector('[name="street"]').value = match.dataset.street || '';
+        document.querySelector('[name="postal_code"]').value = match.dataset.postalCode || '';
+        document.querySelector('[name="city"]').value = match.dataset.city || '';
+    });
 
     const selectedCost = (modelId, materialId, printerId) => {
         const choices = costs[modelId] || {};
@@ -133,7 +145,14 @@ if (saleItems) {
         }
     });
     addItem.addEventListener('click', () => {
-        saleItems.append(itemTemplate.cloneNode(true));
+        const newItem = itemTemplate.cloneNode(true);
+        newItem.querySelector('.item-model').value = '';
+        newItem.querySelector('.item-quantity').value = '1';
+        newItem.querySelector('.item-price').value = '0';
+        newItem.querySelector('.item-material').value = '';
+        newItem.querySelector('.item-printer').value = '';
+        newItem.querySelector('[data-item-default-note]').textContent = 'Modell wählen, um Standardwerte anzuzeigen.';
+        saleItems.append(newItem);
         updateOrder();
     });
     shipping.addEventListener('change', updateOrder);
