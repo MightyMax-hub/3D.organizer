@@ -9,7 +9,7 @@ if not exist ".venv\Scripts\python.exe" (
 
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 goto setup_failed
-".venv\Scripts\python.exe" -m waitress --listen=0.0.0.0:5005 app:app
+".venv\Scripts\python.exe" -m waitress --listen=0.0.0.0:5010 app:app
 goto end
 
 :setup_failed
