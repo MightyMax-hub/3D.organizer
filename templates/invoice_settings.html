@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Rechnungsangaben{% endblock %}
+{% block content %}
+<section class="page-heading compact-heading">
+    <div><p class="eyebrow">RECHNUNGSVORLAGE</p><h1>Rechnungsangaben</h1></div>
+</section>
+<form class="panel editor-form invoice-settings-form" method="post" enctype="multipart/form-data">
+    <div class="form-divider"><span>LOGO</span></div>
+    {% if settings['invoice_logo'] %}<img class="invoice-logo-preview" src="{{ url_for('main.model_image', filename=settings['invoice_logo']) }}" alt="Aktuelles Rechnungslogo">{% endif %}
+    <label class="field-label">Rechnungslogo hochladen<input name="invoice_logo_upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+    <div class="form-divider"><span>ANBIETER</span></div>
+    <div class="form-grid">
+        <label class="field-label">Name / Firma<input name="vendor_name" value="{{ settings['invoice_vendor_name'] }}"></label>
+        <label class="field-label">Telefonnummer<input name="vendor_phone" type="tel" value="{{ settings['invoice_vendor_phone'] }}"></label>
+        <label class="field-label">E-Mail-Adresse<input name="vendor_email" type="email" value="{{ settings['invoice_vendor_email'] }}"></label>
+        <label class="field-label">Adresse<textarea name="vendor_address" rows="3">{{ settings['invoice_vendor_address'] }}</textarea></label>
+    </div>
+    <div class="form-divider"><span>ZAHLUNGSINFORMATION</span></div>
+    <div class="form-grid">
+        <label class="field-label">Bank<input name="payment_bank" value="{{ settings['invoice_payment_bank'] }}"></label>
+        <label class="field-label">IBAN<input name="payment_iban" value="{{ settings['invoice_payment_iban'] }}"></label>
+        <label class="field-label">BIC<input name="payment_bic" value="{{ settings['invoice_payment_bic'] }}"></label>
+    </div>
+    <div class="form-divider"><span>STEUERINFORMATION</span></div>
+    <div class="form-grid">
+        <label class="field-label">Steuernummer<input name="tax_number" value="{{ settings['invoice_tax_number'] }}"></label>
+        <label class="field-label">Wirtschafts-Id.Nr.:<input name="economic_id" value="{{ settings['invoice_economic_id'] }}"></label>
+    </div>
+    <div class="form-divider"><span>ZUSATZTEXT</span></div>
+    <label class="field-label">Zusätzliche Rechnungsinformationen<input name="bold_text" value="{{ settings['invoice_bold_text'] }}"></label>
+    <label class="field-label">Text unter dem Rechnungsbetrag<textarea name="additional_text" rows="4">{{ settings['invoice_additional_text'] }}</textarea></label>
+    <div class="form-actions"><span class="form-hint">Diese Angaben erscheinen auf neu erzeugten Rechnungen.</span><button class="button button-green" type="submit">Angaben speichern <span>↗</span></button></div>
+</form>
+{% endblock %}

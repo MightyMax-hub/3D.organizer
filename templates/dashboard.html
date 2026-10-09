@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Übersicht {{ year }}{% endblock %}
+{% block content %}
+<section class="page-heading overview-heading">
+    <div>
+        <p class="eyebrow">
+            WERKSTATT · {{ year }}
+        </p>
+        <h1>
+            Dein Überblick
+            <span class="heading-period">
+                {{ year }}
+            </span>
+        </h1>
+    </div>
+    <div class="heading-actions">
+        <a class="button button-muted" href="{{ url_for('main.expenses', year=year) }}">
+            + Ausgabe
+        </a>
+        <a class="button button-green" href="{{ url_for('main.new_sale', year=year) }}">
+            + Verkauf erfassen
+        </a>
+    </div>
+</section>
+<section class="ledger-hero" aria-label="Finanzübersicht">
+    <div class="hero-net">
+        <span class="metric-label">
+            BILANZ {{ year }}
+        </span>
+        <strong class="{% if profit < 0 %}negative{% else %}positive{% endif %}">
+            {{ profit|euro }}
+        </strong><span class="net-caption">
+            Einnahmen abzüglich Ausgaben
+        </span></div>
+    <div class="hero-flow">
+        <div>
+            <span class="metric-label">
+                EINNAHMEN
+            </span>
+            <strong class="positive">
+                {{ income|euro }}
+            </strong>
+            <small>
+                Verkäufe ohne Versandkosten
+            </small>
+        </div>
+        <div>
+            <span class="metric-label">
+                AUSGABEN
+            </span>
+            <strong class="negative">
+                {{ expenses|euro }}
+            </strong>
+            <small>
+                Erfasste Werkstattkosten
+            </small>
+        </div>
+    </div>
+</section>
+<section class="stat-strip">
+    <div class="stat-cell">
+        <span>FILAMENT BESTELLT</span>
+        <strong>
+            {{ '%.2f'|format(filament_kg)|replace('.', ',') }} <small>kg</small>
+        </strong>
+        <small>
+            {{ filament_cost|euro }} erfasst
+        </small>
+    </div>
+    <div class="stat-cell">
+        <span>MODELLE IM KATALOG</span>
+        <strong>
+            {{ models|length }}
+        </strong>
+        <small>
+            mit Einzelkosten kalkuliert
+        </small>
+    </div>
+    <div class="stat-cell">
+        <span>TOP-AUSGABE</span>
+        <strong class="stat-text">
+            {% if top_groups %}
+                {{ top_groups[0]['name'] }}
+            {% else %}
+                Noch keine
+            {% endif %}
+        </strong>
+        <small>
+            {% if top_groups %}
+                {{ top_groups[0]['amount']|euro }} in {{ year }}
+            {% else %}
+                Ausgaben hier erfassen
+            {% endif %}
+        </small>
+    </div>
+</section>
+<div class="overview-columns">
+    <section class="panel section-panel">
+        <div class="section-title">
+            <div>
+                <p class="eyebrow">
+                    WOHIN DAS GELD GEHT
+                </p>
+                <h2>
+                    Top-Ausgaben
+                </h2>
+            </div>
+            <a class="text-action" href="{{ url_for('main.expenses', year=year) }}">
+                Alle ansehen 
+                <span>
+                    ↗
+                </span>
+            </a>
+        </div>
+        {% if top_groups %}
+        <div class="rank-list">
+            {% for group in top_groups %}
+            <div class="rank-row">
+                <span class="rank-index">
+                    {{ '%02d'|format(loop.index) }}
+                </span>
+                <span class="rank-name">
+                    {{ group['name'] }}
+                </span>
+                <strong>
+                    {{ group['amount']|euro }}
+                </strong>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+            <p class="empty-note">
+                Noch keine Ausgaben für {{ year }} eingetragen.
+            </p>
+        {% endif %}
+    </section>
+    <section class="panel section-panel year-panel">
+        <div class="section-title">
+            <div>
+                <p class="eyebrow">
+                    JAHRESVERGLEICH
+                </p>
+                <h2>
+                    Kontostand
+                </h2>
+            </div>
+            <form class="year-create" method="post" action="{{ url_for('main.new_year') }}">
+                <input type="number" name="year" min="2000" max="2200" placeholder="Jahr" required aria-label="Neues Jahr">
+                <button class="icon-button" title="Jahr anlegen" aria-label="Jahr anlegen">
+                    +</button></form></div>
+        <div class="year-table">
+            <div class="table-head">
+                <span>
+                    JAHR
+                </span>
+                <span>
+                    EINNAHMEN
+                </span>
+                <span>
+                    AUSGABEN
+                </span>
+                <span>
+                    ERGEBNIS
+                </span>
+            </div>
+        {% for item in totals %}
+        <div class="year-row">
+            <span class="year-year">
+                <a href="{{ url_for('main.statistics', year=item['year']) }}">
+                    {{ item['year'] }}
+                </a>
+                <a class="year-export" href="{{ url_for('main.export_euer', year=item['year']) }}" title="EÜR {{ item['year'] }} exportieren" aria-label="EÜR {{ item['year'] }} exportieren">
+                    ↓
+                </a>
+            </span>
+            <span>
+                {{ item['income']|euro }}
+            </span>
+            <span>
+                {{ item['expenses']|euro }}
+            </span>
+            <strong class="{% if item['income']-item['expenses'] < 0 %}negative{% else %}positive{% endif %}">
+                {{ (item['income']-item['expenses'])|euro }}
+            </strong>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+<section class="panel model-summary">
+    <div class="section-title">
+        <div>
+            <p class="eyebrow">
+                KATALOG & PRODUKTION
+            </p>
+            <h2>
+                Modelle im Überblick
+            </h2>
+        </div>
+        <a class="text-action" href="{{ url_for('main.model_list') }}">
+            Modelle öffnen 
+            <span>
+                ↗
+            </span>
+        </a>
+    </div>
+    {% if models %}
+    <div class="data-table model-overview-table">
+        <div class="data-head">
+            <span>
+                MODELL
+            </span>
+            <span>
+                VERKAUFT
+            </span>
+            <span>
+                DRUCKZEIT GESAMT
+            </span>
+            <span>
+                MATERIAL GESAMT
+            </span>
+            <span>
+                DRUCKKOSTEN GESAMT
+            </span>
+        </div>
+        {% for item in models %}
+        <a class="data-row" href="{{ url_for('main.model_detail', model_id=item['model']['id']) }}">
+            <strong>
+                {{ item['model']['name'] }}
+            </strong>
+            <span>
+                {{ item['model']['sold_units'] }} Stk.
+            </span>
+            <span>
+                {{ '%.1f'|format(item['hours']) }} h
+            </span>
+            <span>
+                {{ '%.0f'|format(item['grams']) }} g
+            </span>
+            <span>
+                {{ item['cost']|euro }}
+            </span>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-note">
+        Noch keine Modelle angelegt. Druckkosten und Verkaufspreise kannst du im Modellkatalog kalkulieren.
+    </p>
+    {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,29 @@
+<nav class="year-nav" aria-label="Jahresnavigation">
+    <div class="year-tabs">{% for item in years %}
+        <a class="{% if item['year']==year %}active{% endif %}" href="{% if request.endpoint == 'main.sales' %}{{ url_for('main.sales', year=item['year']) }}{% elif request.endpoint == 'main.statistics' %}{{ url_for('main.statistics', year=item['year']) }}{% else %}{{ url_for('main.expenses', year=item['year']) }}{% endif %}">
+            {{ item['year'] }}
+
+        </a>
+        {% endfor %}
+    </div>
+    
+    <div class="year-links">
+        <!-- Add links to other year-specific pages 
+        <a href="{{ url_for('main.expenses', year=year) }}">
+            Ausgaben
+        </a>
+        
+        <a href="{{ url_for('main.sales', year=year) }}">
+            Einnahmen / Verkäufe
+        </a>
+        {% if request.endpoint == 'main.expenses' %}
+            <a href="{{ url_for('main.shipping_methods', year=year) }}">
+                Versandkosten
+            </a>
+        {% endif %}
+        -->
+        <a href="{{ url_for('main.statistics', year=year) }}">
+            Statistik
+        </a>
+    </div>
+</nav>

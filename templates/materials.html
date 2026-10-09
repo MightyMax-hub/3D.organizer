@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Material{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">KALKULATION · MATERIAL</p><h1>Materialien</h1><p class="page-subtitle">Filamente und weitere Werkstoffe mit Einkaufspreis pro Kilogramm.</p></div></section>
+<div class="two-column-page">
+    <section class="panel section-panel"><div class="section-title"><div><p class="eyebrow">BESTAND</p><h2>Nach Typ gruppiert</h2></div></div>
+        {% if grouped %}{% for kind, items in grouped.items() %}<div class="material-group"><h3>{{ kind }}</h3>{% for material in items %}<div class="material-row"><div><strong>{{ material['name'] }}</strong><small>{{ material['price_per_kg']|euro }} / kg</small></div><form method="post" action="{{ url_for('main.delete_material', material_id=material['id']) }}" onsubmit="return confirm('Material wirklich entfernen?')"><button class="icon-button icon-delete" title="Material löschen" aria-label="{{ material['name'] }} löschen">×</button></form></div>{% endfor %}</div>{% endfor %}{% else %}<p class="empty-note">Noch keine Materialien angelegt.</p>{% endif %}
+    </section>
+    <form class="panel editor-form" method="post"><p class="eyebrow">NEU ANLEGEN</p><h2>Material hinzufügen</h2><label class="field-label" for="name">Materialname</label><input id="name" name="name" placeholder="z. B. PLA Schwarz" required><label class="field-label" for="material_type">Typ / Gruppe</label><input id="material_type" name="material_type" list="material-types" placeholder="z. B. PLA" required><datalist id="material-types">{% for kind in grouped %}<option value="{{ kind }}">{% endfor %}</datalist><label class="field-label" for="price_per_kg">Preis pro kg (€)</label><input id="price_per_kg" name="price_per_kg" type="number" min="0" step="0.01" placeholder="19,99" required><button class="button button-green form-submit">Material speichern <span>↗</span></button></form>
+</div>
+{% endblock %}

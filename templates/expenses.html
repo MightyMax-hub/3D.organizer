@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Ausgaben {{ year }}{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">JAHRESBUCHHALTUNG · {{ year }}</p><h1>Ausgaben</h1><p class="page-subtitle">Neueste Ausgaben zuerst · {{ rows|length }} Einträge</p></div><div class="heading-actions"><a class="button button-muted" href="{{ url_for('main.shipping_methods', year=year) }}">Versandkosten ⚙</a><a class="button button-muted" href="{{ url_for('main.sales', year=year) }}">Einnahmen ↗</a></div></section>
+{% include "year_nav.html" %}
+<section class="sales-summary expenses-summary">
+    <div><span class="metric-label">AUSGABEN {{ year }}</span><strong class="negative">{{ total|euro }}</strong></div>
+    <div><span class="metric-label">AUSGABEN PRO MONAT</span><strong class="negative">{{ average_monthly_expenses|euro }}</strong></div>
+</section>
+<div class="two-column-page transaction-layout">
+    <section class="panel section-panel"><div class="section-title"><div><p class="eyebrow">AUSGABENLISTE</p><h2>Einträge</h2></div></div>
+        {% if rows %}<div class="transaction-list">{% for row in rows %}<article class="transaction-row"><div class="transaction-date">{{ row['date'] }}</div><div class="transaction-main"><strong>{{ row['name'] }}</strong><small>{{ row['group_name'] }}{% if row['additional_info'] %} · {{ row['additional_info'] }}{% endif %}</small>{% if row['note'] %}<p>{{ row['note'] }}</p>{% endif %}<a class="text-action expense-edit-link" href="{{ url_for('main.edit_expense', expense_id=row['id']) }}" title="Ausgabe bearbeiten">Bearbeiten ✎</a></div><div class="transaction-value"><strong class="negative">− {{ row['amount']|euro }}</strong>{% if row['quantity_kg'] %}<small>{{ '%.2f'|format(row['quantity_kg']) }} kg</small>{% endif %}</div></article>{% endfor %}</div>{% else %}<p class="empty-note">Für {{ year }} sind noch keine Ausgaben erfasst.</p>{% endif %}
+    </section>
+    <div class="form-stack"><form class="panel editor-form" method="post"><p class="eyebrow">NEUER BELEG</p><h2>Ausgabe erfassen</h2><label class="field-label">Name<input name="name" required placeholder="z. B. PLA Filament"></label><label class="field-label">Gruppe<select name="group_id" required>{% for group in groups %}<option value="{{ group['id'] }}">{{ group['name'] }}</option>{% endfor %}</select></label><label class="field-label">Zusatzinfo<input name="additional_info" placeholder="Marke, Händler …"></label><div class="form-grid"><label class="field-label">Betrag (€)<input name="amount" type="number" min="0" step="0.01" required></label><label class="field-label">Menge Filament (kg)<input name="quantity_kg" type="number" min="0" step="0.001" value="0"></label></div><label class="field-label">Datum<input name="date" type="date" value="{{ today or '' }}" required></label><label class="field-label">Notiz<textarea name="note" rows="2"></textarea></label><button class="button button-green form-submit">Ausgabe speichern <span>↗</span></button></form>
+        <form class="panel inline-create" method="post" action="{{ url_for('main.new_group') }}"><div><strong>Gruppe ergänzen</strong><small>Für eine übersichtliche Auswertung</small></div><div class="inline-input"><input name="name" placeholder="Neue Gruppe" required><button class="icon-button" title="Gruppe speichern" aria-label="Gruppe speichern">+</button></div></form>
+    </div>
+</div>
+{% endblock %}

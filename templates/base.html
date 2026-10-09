@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101211">
+    <title>{% block title %}Übersicht{% endblock %} · TornScilt Werkstatt</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="{{ url_for('main.dashboard') }}">{% if site_logo %}<img src="{{ url_for('main.model_image', filename=site_logo) }}" alt="Werkstattlogo">{% else %}<span class="brand-placeholder" aria-hidden="true"></span>{% endif %}<span>3D WERKSTATT</span></a>
+        <form class="brand-logo-upload" method="post" action="{{ url_for('main.upload_site_logo') }}" enctype="multipart/form-data">
+            <label class="quick-add" title="Eigenes Logo hinzufügen" aria-label="Eigenes Logo hinzufügen">+
+                <input type="file" name="logo" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Eigenes Logo auswählen" onchange="this.form.submit()">
+            </label>
+        </form>
+        <nav class="main-nav" aria-label="Hauptnavigation">
+            <a href="{{ url_for('main.dashboard') }}">Übersicht</a>
+            <a href="{{ url_for('main.model_list') }}">Modelle</a>
+            <a href="{{ url_for('main.materials') }}">Material</a>
+            <a href="{{ url_for('main.printers') }}">Drucker</a>
+            <a href="{{ url_for('main.invoice_settings_page') }}">Rechnungsangaben</a>
+            {% if years %}<a href="{{ url_for('main.expenses', year=years[0]['year']) }}">Ausgaben</a>
+            <a href="{{ url_for('main.sales', year=years[0]['year']) }}">Einnahmen</a>{% endif %}
+        </nav>
+        <a class="quick-add" href="{{ url_for('main.new_model') }}" title="Modell erstellen" aria-label="Modell erstellen">+</a>
+    </header>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}<div class="flash-stack">{% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+    {% endwith %}
+    <main>{% block content %}{% endblock %}</main>
+    <footer class="footer"><span>TORNSCILT · 3D DRUCK ORGANISATION</span><span>Lokales Netzwerk · SQLite</span></footer>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

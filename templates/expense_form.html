@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Ausgabe bearbeiten {{ expense['year'] }}{% endblock %}
+{% block content %}
+<section class="page-heading compact-heading"><div><a class="back-link" href="{{ url_for('main.expenses', year=expense['year']) }}">← Ausgaben {{ expense['year'] }}</a><p class="eyebrow">BELEG KORRIGIEREN · {{ expense['year'] }}</p><h1>Ausgabe bearbeiten</h1></div></section>
+{% if error %}<p class="form-error">Bitte prüfe die Eingaben. Das Datum muss zum Buchungsjahr {{ expense['year'] }} gehören.</p>{% endif %}
+<form class="panel editor-form expense-editor" method="post">
+    <label class="field-label">Name<input name="name" value="{{ values['name'] }}" required></label>
+    <label class="field-label">Gruppe<select name="group_id" required>{% for group in groups %}<option value="{{ group['id'] }}" {% if values['group_id']|int == group['id'] %}selected{% endif %}>{{ group['name'] }}</option>{% endfor %}</select></label>
+    <label class="field-label">Zusatzinfo<input name="additional_info" value="{{ values['additional_info'] }}"></label>
+    <div class="form-grid"><label class="field-label">Betrag (€)<input name="amount" type="number" min="0" step="0.01" value="{{ values['amount'] }}" required></label><label class="field-label">Menge Filament (kg)<input name="quantity_kg" type="number" min="0" step="0.001" value="{{ values['quantity_kg'] }}"></label></div>
+    <label class="field-label">Datum<input name="date" type="date" value="{{ values['date'] }}" required></label>
+    <label class="field-label">Notiz<textarea name="note" rows="3">{{ values['note'] }}</textarea></label>
+    <div class="form-actions"><span class="form-hint">Die Ausgabe bleibt im Buchungsjahr {{ expense['year'] }}.</span><button class="button button-green" type="submit">Änderungen speichern <span>↗</span></button></div>
+</form>
+{% endblock %}

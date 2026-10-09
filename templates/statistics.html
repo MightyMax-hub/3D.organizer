@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Statistik {{ year }}{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <a class="back-link" href="{{ url_for('main.sales', year=year) }}">
+            ← Einnahmen {{ year }}
+        </a>
+        <p class="eyebrow">
+            AUSWERTUNG · {{ year }}
+        </p>
+        <h1>
+            Statistik
+        </h1>
+    </div>
+</section>
+{% include "year_nav.html" %}
+<form class="panel period-filter" method="get">
+    <input type="hidden" name="view" value="{{ view }}">
+    <label class="field-label">
+        Von
+        <input name="start" type="date" value="{{ start }}">
+    </label>
+    <label class="field-label">
+        Bis
+        <input name="end" type="date" value="{{ end }}">
+    </label>
+    <button class="button button-muted">
+        Zeitraum anzeigen
+    </button>
+</form>
+<section class="sales-summary stats-summary">
+    <div>
+        <span class="metric-label">
+            EINNAHMEN ZEITRAUM
+        </span>
+        <strong>
+            {{ income|euro }}
+        </strong>
+    </div>
+    <div>
+        <span class="metric-label">AUFTRAGSKOSTEN</span>
+        <strong>{{ order_costs|euro }}</strong>
+    </div>
+    <div>
+        <span class="metric-label">GEWINN</span>
+        <strong class="{% if profit < 0 %}negative{% else %}positive{% endif %}">{{ profit|euro }}</strong>
+    </div>
+    <div>
+        <span class="metric-label">
+            AUSGABEN ZEITRAUM
+        </span>
+        <strong class="negative">
+            {{ expense|euro }}
+        </strong>
+    </div>
+    <div>
+        <span class="metric-label">
+            ERGEBNIS NACH AUSGABEN
+        </span>
+            <strong class="{% if result < 0 %}negative{% else %}positive{% endif %}">
+                {{ result|euro }}
+        </strong>
+    </div>
+    <div>
+        <span class="metric-label">
+            VERKÄUFE
+        </span>
+        <strong>
+            {{ sale_count }}
+        </strong>
+    </div>
+</section>
+<section class="panel chart-panel">
+    <div class="section-title">
+        <div>
+            <p class="eyebrow">
+                {% if view == 'daily' %}TAGESVERGLEICH{% else %}MONATSVERGLEICH{% endif %}
+            </p>
+            
+            <h2>
+                Einnahmen & Ausgaben
+            </h2>
+        </div>
+        
+        <div class="chart-tools">
+        <nav class="stats-view-toggle" aria-label="Statistikansicht">
+            <a class="{% if view == 'monthly' %}active{% endif %}" href="{{ url_for('main.statistics', year=year, start=start, end=end, view='monthly') }}">Monatlich</a>
+            <a class="{% if view == 'daily' %}active{% endif %}" href="{{ url_for('main.statistics', year=year, start=start, end=end, view='daily') }}">Täglich</a>
+        </nav>
+        <div class="chart-legend">
+            <span>
+                <i class="legend-income">
+
+                </i>
+                Einnahmen
+            </span>
+            <span>
+                <i class="legend-expense"></i>
+                Ausgaben
+            </span>
+        </div>
+        </div>
+    </div>
+    {% if months %}
+    <div class="bar-chart {% if view == 'daily' %}daily-chart{% endif %}">
+        {% for item in months %}
+        <div class="chart-month">
+            <div class="bar-pair">
+                <span class="bar bar-income" style="height: {{ [item['income'] / max_value * 100, 3]|max }}%" title="Einnahmen {{ item['income']|euro }}"></span>
+                <span class="bar bar-expense" style="height: {{ [item['expenses'] / max_value * 100, 3]|max }}%" title="Ausgaben {{ item['expenses']|euro }}">
+                </span>
+            </div>
+            <small>{{ item['label'] }}</small>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-note">In diesem Zeitraum gibt es noch keine Buchungen.</p>
+    {% endif %}
+</section>
+{% endblock %}

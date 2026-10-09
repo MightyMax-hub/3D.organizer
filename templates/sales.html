@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Einnahmen {{ year }}{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <p class="eyebrow">
+            JAHRESBUCHHALTUNG · {{ year }}
+
+        </p>
+        <h1>
+            Einnahmen
+        </h1>
+        <p class="page-subtitle">
+            Verkäufe, Auftragsstatus und Rechnungen für {{ year }}.
+        </p>
+    </div>
+    <div class="heading-actions">
+        <a class="button button-muted" href="{{ url_for('main.expenses', year=year) }}">
+            Ausgaben ↗
+        </a>
+        <a class="button button-muted" href="{{ url_for('main.invoice_settings_page') }}">
+            Rechnungsangaben
+        </a>
+        <a class="button button-green" href="{{ url_for('main.new_sale', year=year) }}">
+            <span>
+                +
+            </span> Verkauf erfassen
+        </a>
+    </div>
+</section>
+{% include "year_nav.html" %}
+<section class="sales-summary">
+    <div>
+        <span class="metric-label">
+            DURCHSCHNITT EINNAHMEN / MONAT
+        </span>
+        <strong>{{ monthly_income|euro }}</strong>
+    </div>
+    <div>
+        <span class="metric-label">
+            DURCHSCHNITT GEWINN / MONAT
+        </span>
+        <strong class="{% if total_income-total_cost < 0 %}negative{% else %}positive{% endif %}">
+            {{ monthly_profit|euro }}
+        </strong>
+    </div>
+    <div>
+        <span class="metric-label">
+            VERKÄUFE / MONAT
+        </span>
+        <strong>
+            {{ '%.1f'|format(monthly_sales) }}
+        </strong>
+        <small>
+            {{ rows|length }} Aufträge im Jahr
+        </small>
+    </div>
+    <div>
+        <span class="metric-label">
+            EINNAHMEN OHNE VERSAND
+        </span>
+        <strong>{{ total_income|euro }}</strong>
+    </div>
+    <div>
+        <span class="metric-label">GEWINN GESAMT</span>
+        <strong class="{% if total_profit < 0 %}negative{% else %}positive{% endif %}">{{ total_profit|euro }}</strong>
+    </div>
+</section>
+<section class="panel section-panel orders-panel">
+    <div class="section-title">
+        <div>
+            <p class="eyebrow">
+                AUFTRAGSÜBERSICHT
+            </p>
+            <h2>
+                {{ rows|length }} Aufträge
+            </h2>
+        </div>
+    </div>
+    {% if rows %}
+    <div class="orders-list">
+        {% for row in rows %}
+        <article class="order-row">
+            <div class="order-number">
+                <span>
+                    {{ '%03d'|format(row['number']) }}
+                </span>
+                <small>
+                    {{ row['date'] }}
+                </small>
+            </div>
+            <div class="order-customer">
+                <div class="order-customer-heading">
+                    <strong>{{ row['customer_name'] or 'Kunde ohne Namen' }}</strong>
+                </div>
+                <span>
+                    {{ row['item_labels'] }} · {{ row['platform'] or 'Plattform offen' }}
+                </span>
+                <div class="order-items">
+                    {% for item in row['items'] %}
+                    <div class="order-line">
+                        <span>
+                            {{ item['model_name'] }} × {{ item['quantity'] }} · {{ (item['quantity']*item['item_price'])|euro }}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="order-statuses">
+                <form method="post" action="{{ url_for('main.update_sale_status', sale_id=row['id']) }}">
+                    <label>
+                        <input type="checkbox" name="paid" {% if row['paid'] %}checked{% endif %}> 
+                        Bezahlt
+                    </label>
+                    <label>
+                        <input type="checkbox" name="printed" {% if row['printed'] %}checked{% endif %}>
+                        Gedruckt
+                    </label>
+                    <label>
+                        <input type="checkbox" name="shipped" {% if row['shipped'] %}checked{% endif %}> 
+                        Versendet
+                    </label>
+                    <label class="shipping-date-field">Versanddatum<input type="date" name="shipping_date" value="{{ row['shipping_date'] }}"></label>
+                    <button class="status-save" title="Status speichern" aria-label="Status speichern">✓</button>
+                </form>
+            </div>
+            <div class="order-financials">
+                <strong class="order-price">{{ row['order_gross']|euro }}</strong>
+                {% if row['shipping_price'] %}<small class="order-shipping">- Versand {{ row['shipping_price']|euro }}</small>{% endif %}
+                <small>Einnahmen {{ row['order_income']|euro }}</small>
+                <small>Kosten {{ row['order_costs']|euro }}</small>
+                <strong class="order-profit {% if row['order_profit'] < 0 %}negative{% else %}positive{% endif %}">Gewinn {{ row['order_profit']|euro }}</strong>
+            </div>
+            <div class="invoice-actions">
+                <a class="invoice-link" href="{{ url_for('main.invoice', sale_id=row['id']) }}" title="Rechnung als PDF" aria-label="Rechnung als PDF herunterladen">↓</a>
+                <a class="invoice-link" href="{{ url_for('main.edit_sale', sale_id=row['id']) }}" title="Rechnung bearbeiten" aria-label="Rechnung bearbeiten">✎</a>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-note">
+        Noch keine Verkäufe in {{ year }} erfasst.
+    </p>
+    {% endif %}
+</section>
+{% endblock %}
