@@ -319,7 +319,7 @@ textarea { resize: vertical; line-height: 1.5; }
 .chart-legend { display: flex; gap: 15px; color: var(--muted); font-size: 10px; }
 .chart-legend span { display: flex; align-items: center; gap: 6px; }
 .chart-legend i { width: 8px; height: 8px; background: var(--green); }
-.chart-legend .legend-income { background: #929b96; }
+.chart-legend .legend-income { background: var(--green); }
 .chart-legend .legend-expense { background: var(--red); }
 .chart-legend .legend-order-cost { background: #db887f; }
 .chart-legend .legend-profit { background: var(--green); }
