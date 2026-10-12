@@ -2,5 +2,8 @@
 __pycache__/
 *.py[cod]
 data/*.sqlite3
+data/*.csv
 data/model_images/
 data/uploads/
+import_sales.py
+import_models.py

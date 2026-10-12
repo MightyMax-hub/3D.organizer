@@ -64,7 +64,19 @@ def init_database():
                 additional_material_cost REAL NOT NULL DEFAULT 0,
                 additional_work_hours REAL NOT NULL DEFAULT 0,
                 additional_hourly_cost REAL NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            );
+            CREATE TABLE IF NOT EXISTS model_categories (
+                model_id INTEGER NOT NULL,
+                category_id INTEGER NOT NULL,
+                PRIMARY KEY (model_id, category_id),
+                FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE,
+                FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS model_parts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,6 +86,7 @@ def init_database():
                 printer_id INTEGER NOT NULL,
                 weight_g REAL NOT NULL DEFAULT 0,
                 print_hours REAL NOT NULL DEFAULT 0,
+                part_price REAL NOT NULL DEFAULT 0,
                 FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE,
                 FOREIGN KEY (material_id) REFERENCES materials(id),
                 FOREIGN KEY (printer_id) REFERENCES printers(id)
@@ -131,6 +144,7 @@ def init_database():
                 printed INTEGER NOT NULL DEFAULT 0,
                 note TEXT NOT NULL DEFAULT '',
                 shipping_date TEXT NOT NULL DEFAULT '',
+                show_archived INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(year, number),
                 FOREIGN KEY (year) REFERENCES book_years(year),
                 FOREIGN KEY (model_id) REFERENCES models(id),
@@ -147,6 +161,10 @@ def init_database():
                 printer_id INTEGER,
                 item_price REAL NOT NULL DEFAULT 0,
                 printed INTEGER NOT NULL DEFAULT 0,
+                customer_note TEXT NOT NULL DEFAULT '',
+                part_id INTEGER,
+                part_name TEXT NOT NULL DEFAULT '',
+                part_cost REAL NOT NULL DEFAULT 0,
                 FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
                 FOREIGN KEY (model_id) REFERENCES models(id),
                 FOREIGN KEY (material_id) REFERENCES materials(id),
@@ -226,6 +244,27 @@ def init_database():
             connection.execute("ALTER TABLE sales ADD COLUMN company_name TEXT NOT NULL DEFAULT ''")
         if "shipping_date" not in sale_columns:
             connection.execute("ALTER TABLE sales ADD COLUMN shipping_date TEXT NOT NULL DEFAULT ''")
+        if "show_archived" not in sale_columns:
+            connection.execute("ALTER TABLE sales ADD COLUMN show_archived INTEGER NOT NULL DEFAULT 1")
+        sale_item_columns = {
+            column["name"]
+            for column in connection.execute("PRAGMA table_info(sale_items)").fetchall()
+        }
+        if "customer_note" not in sale_item_columns:
+            connection.execute("ALTER TABLE sale_items ADD COLUMN customer_note TEXT NOT NULL DEFAULT ''")
+        for column, definition in (
+            ("part_id", "INTEGER"),
+            ("part_name", "TEXT NOT NULL DEFAULT ''"),
+            ("part_cost", "REAL NOT NULL DEFAULT 0"),
+        ):
+            if column not in sale_item_columns:
+                connection.execute(f"ALTER TABLE sale_items ADD COLUMN {column} {definition}")
+        part_columns = {
+            column["name"]
+            for column in connection.execute("PRAGMA table_info(model_parts)").fetchall()
+        }
+        if "part_price" not in part_columns:
+            connection.execute("ALTER TABLE model_parts ADD COLUMN part_price REAL NOT NULL DEFAULT 0")
         connection.execute(
             """UPDATE sales SET printed=1 WHERE id IN (
             SELECT sale_id FROM sale_items GROUP BY sale_id HAVING MIN(printed)=1
@@ -240,6 +279,7 @@ def init_database():
             ("additional_material_cost", "REAL NOT NULL DEFAULT 0"),
             ("additional_work_hours", "REAL NOT NULL DEFAULT 0"),
             ("additional_hourly_cost", "REAL NOT NULL DEFAULT 0"),
+            ("archived", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if column not in model_columns:
                 connection.execute(f"ALTER TABLE models ADD COLUMN {column} {definition}")

@@ -1,6 +1,50 @@
 {% extends "base.html" %}
-{% block title %}Modelle{% endblock %}
+{% block title %}{% if archive_view %}Archiv{% else %}Modelle{% endif %}{% endblock %}
 {% block content %}
-<section class="page-heading"><div><p class="eyebrow">PRODUKTE · KOSTEN & VERKAUF</p><h1>Modellkatalog</h1><p class="page-subtitle">Teile, Materialeinsatz, Druckzeit und Kalkulation je Modell.</p></div><a class="button button-green" href="{{ url_for('main.new_model') }}"><span>+</span> Modell erstellen</a></section>
-{% if models %}<div class="catalog-grid">{% for item in models %}<a class="catalog-card" href="{{ url_for('main.model_detail', model_id=item['model']['id']) }}">{% if item['model']['image_filename'] %}<img class="catalog-image" src="{{ url_for('main.model_image', filename=item['model']['image_filename']) }}" alt="Vorschau {{ item['model']['name'] }}">{% else %}<div class="catalog-image image-placeholder"><span>3D</span></div>{% endif %}<div class="catalog-info"><div class="catalog-title"><h2>{{ item['model']['name'] }}</h2><span>{{ item['model']['sold_units'] }} verkauft</span></div><p>{{ '%.0f'|format(item['grams']) }} g · {{ '%.1f'|format(item['hours']) }} h Druckzeit</p><div class="catalog-price"><span>Kosten {{ item['cost']|euro }}</span><strong>Preis {{ item['model']['sale_price']|euro }}</strong></div></div></a>{% endfor %}</div>{% else %}<section class="panel empty-state"><span class="empty-symbol">＋</span><h2>Dein Katalog ist bereit</h2><p>Lege ein Modell mit mindestens einem Druckteil an.</p><a class="button button-green" href="{{ url_for('main.new_model') }}">Modell erstellen <span>↗</span></a></section>{% endif %}
+<section class="page-heading">
+	<div><p class="eyebrow">PRODUKTE · KOSTEN & VERKAUF</p><h1>{% if archive_view %}Archiv{% else %}Modellkatalog{% endif %}</h1><p class="page-subtitle">Teile, Materialeinsatz, Druckzeit und Kalkulation je Modell.</p></div>
+	<div class="heading-actions">
+		{% if archive_view %}<a class="button button-muted" href="{{ url_for('main.model_list', category=selected_category) }}">Aktive Modelle</a>{% else %}<a class="button button-muted" href="{{ url_for('main.model_list', archive=1, category=selected_category) }}">Archiv</a>{% endif %}
+		<a class="button button-green" href="{{ url_for('main.new_model') }}"><span>+</span> Modell erstellen</a>
+	</div>
+</section>
+<section class="category-toolbar" aria-label="Kategorien verwalten und filtern">
+	<form class="category-create" method="post" action="{{ url_for('main.create_category') }}">
+		<input type="hidden" name="archive" value="{{ 1 if archive_view else '' }}">
+		<input type="hidden" name="filter_category" value="{{ selected_category or '' }}">
+		<label class="sr-only" for="new-category">Neue Kategorie</label>
+		<input id="new-category" name="name" placeholder="Neue Kategorie" required>
+		<button class="button button-muted" type="submit">Kategorie hinzufügen</button>
+	</form>
+	<nav class="category-filters" aria-label="Modelle nach Kategorie filtern">
+		<a class="category-filter {% if not selected_category %}active{% endif %}" href="{{ url_for('main.model_list', archive=1 if archive_view else none) }}">Alle</a>
+		{% for category in categories %}
+		<span class="category-filter-item">
+			<a class="category-filter {% if selected_category==category['id'] %}active{% endif %}" href="{{ url_for('main.model_list', archive=1 if archive_view else none, category=category['id']) }}">{{ category['name'] }}</a>
+			<form method="post" action="{{ url_for('main.delete_category', category_id=category['id']) }}" onsubmit="return confirm('Kategorie und ihre Zuordnungen wirklich entfernen?')">
+				<input type="hidden" name="archive" value="{{ 1 if archive_view else '' }}">
+				<input type="hidden" name="filter_category" value="{{ selected_category or '' }}">
+				<button class="category-remove" type="submit" title="Kategorie entfernen" aria-label="Kategorie {{ category['name'] }} entfernen">×</button>
+			</form>
+		</span>
+		{% endfor %}
+	</nav>
+</section>
+{% if models %}
+<div class="catalog-grid">
+	{% for item in models %}
+	<a class="catalog-card" href="{{ url_for('main.model_detail', model_id=item['model']['id']) }}">
+		{% if item['model']['image_filename'] %}<img class="catalog-image" src="{{ url_for('main.model_image', filename=item['model']['image_filename']) }}" alt="Vorschau {{ item['model']['name'] }}">{% else %}<div class="catalog-image image-placeholder"><span>3D</span></div>{% endif %}
+		<div class="catalog-info">
+			<div class="catalog-title"><h2>{{ item['model']['name'] }}</h2><span>{{ item['model']['sold_units'] }} verkauft</span></div>
+			{% if item['model']['categories'] %}<div class="model-category-list">{% for category in item['model']['categories'] %}<span>{{ category['name'] }}</span>{% endfor %}</div>{% endif %}
+			<p>{{ '%.0f'|format(item['grams']) }} g · {{ '%.1f'|format(item['hours']) }} h Druckzeit</p>
+			<div class="catalog-price"><span>Kosten {{ item['cost']|euro }}</span><strong>Preis {{ item['model']['sale_price']|euro }}</strong></div>
+		</div>
+	</a>
+	{% endfor %}
+</div>
+{% else %}
+<section class="panel empty-state"><span class="empty-symbol">＋</span><h2>{% if archive_view %}Keine Modelle im Archiv{% elif selected_category %}Keine Modelle in dieser Kategorie{% else %}Dein Katalog ist bereit{% endif %}</h2>{% if not archive_view %}<p>Lege ein Modell mit mindestens einem Druckteil an.</p><a class="button button-green" href="{{ url_for('main.new_model') }}">Modell erstellen <span>↗</span></a>{% endif %}</section>
+{% endif %}
 {% endblock %}

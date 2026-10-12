@@ -7,6 +7,7 @@
 <form class="panel editor-form model-editor" method="post" enctype="multipart/form-data">
     <div class="form-grid"><label class="field-label">Modellname<input name="name" value="{{ values['name'] if values else '' }}" required placeholder="z. B. Kabelhalter"></label><label class="field-label">Verkaufspreis (€)<input name="sale_price" type="number" min="0" step="0.01" value="{{ values['sale_price'] if values else 0 }}" required></label></div>
     <label class="field-label">Beschreibung<textarea name="description" rows="2" placeholder="Optional">{{ values['description'] if values else '' }}</textarea></label>
+    <fieldset class="category-picker"><legend>Kategorien</legend>{% if categories %}<div class="category-checkboxes">{% for category in categories %}<label><input type="checkbox" name="category_ids" value="{{ category['id'] }}" {% if category['id'] in selected_category_ids %}checked{% endif %}>{{ category['name'] }}</label>{% endfor %}</div>{% else %}<small>Lege Kategorien im Modellkatalog an.</small>{% endif %}</fieldset>
     <div class="form-divider"><span>ZUSÄTZLICHER AUFWAND PRO STÜCK</span></div>
     <div class="form-grid">
         <label class="field-label">Zusatzmaterial: Art / Hinweis<input name="additional_material_note" value="{{ values['additional_material_note'] if values else '' }}" placeholder="z. B. Magnete, Schrauben"></label>
@@ -18,12 +19,41 @@
     <div class="section-title part-title"><div><p class="eyebrow">MINDESTENS EIN TEIL</p><h2>Bauteile</h2></div><button class="button button-muted" type="button" data-add-part>+ Teil hinzufügen</button></div>
     {% set form_parts = parts if parts else [none] %}
     <div class="part-list" data-part-list>
-        {% for part in form_parts %}<div class="part-row" data-part-row><div class="part-row-heading"><strong>Teil <span data-part-number>{{ '%02d'|format(loop.index) }}</span></strong><button class="icon-button icon-delete" type="button" data-remove-part title="Teil entfernen" aria-label="Teil entfernen">×</button></div><div class="form-grid"><label class="field-label">Name<input name="part_name" value="{{ part['name'] if part else '' }}" required placeholder="Bauteil"></label><label class="field-label">Filament<select name="material_id" required><option value="">Material wählen</option>{% for material in materials %}<option value="{{ material['id'] }}" data-price="{{ material['price_per_kg'] }}" {% if part and part['material_id']==material['id'] %}selected{% endif %}>{{ material['name'] }} · {{ material['price_per_kg']|euro }}/kg</option>{% endfor %}</select></label><label class="field-label">Drucker<select name="printer_id" required><option value="">Drucker wählen</option>{% for printer in printers %}<option value="{{ printer['id'] }}" data-rate="{{ printer_rates[printer['id']] }}" {% if part and part['printer_id']==printer['id'] %}selected{% endif %}>{{ printer['name'] }}</option>{% endfor %}</select></label><label class="field-label">Gewicht (g)<input name="weight_g" type="number" min="0" step="0.01" value="{{ part['weight_g'] if part else 0 }}" required></label><label class="field-label">Druckzeit (Stunden)<input name="print_hours" type="number" min="0" step="1" value="{{ part['input_hours'] if part else 0 }}" required></label><label class="field-label">Druckzeit (Minuten)<input name="print_minutes" type="number" min="0" max="59" step="1" value="{{ part['input_minutes'] if part else 0 }}" required></label></div><div class="part-cost-line">Teilkosten <strong data-part-cost>0,00 €</strong></div></div>{% endfor %}
+        {% for part in form_parts %}
+        <div class="part-row" data-part-row>
+            <div class="part-row-heading"><strong>Teil <span data-part-number>{{ '%02d'|format(loop.index) }}</span></strong><button class="icon-button icon-delete" type="button" data-remove-part title="Teil entfernen" aria-label="Teil entfernen">×</button></div>
+            <div class="form-grid">
+                <label class="field-label">Name<input name="part_name" value="{{ part['name'] if part else '' }}" required placeholder="Bauteil"></label>
+                <label class="field-label">Filament<select name="material_id" required><option value="">Material wählen</option>{% for material in materials %}<option value="{{ material['id'] }}" data-price="{{ material['price_per_kg'] }}" {% if part and part['material_id']==material['id'] %}selected{% endif %}>{{ material['name'] }} · {{ material['price_per_kg']|euro }}/kg</option>{% endfor %}</select></label>
+                <label class="field-label">Drucker<select name="printer_id" required><option value="">Drucker wählen</option>{% for printer in printers %}<option value="{{ printer['id'] }}" data-rate="{{ printer_rates[printer['id']] }}" {% if part and part['printer_id']==printer['id'] %}selected{% endif %}>{{ printer['name'] }}</option>{% endfor %}</select></label>
+                <label class="field-label">Gewicht (g)<input name="weight_g" type="number" min="0" step="0.01" value="{{ part['weight_g'] if part else 0 }}" required></label>
+                <label class="field-label">Druckzeit (Stunden)<input name="print_hours" type="number" min="0" step="1" value="{{ part['input_hours'] if part else 0 }}" required></label>
+                <label class="field-label">Druckzeit (Minuten)<input name="print_minutes" type="number" min="0" max="59" step="1" value="{{ part['input_minutes'] if part else 0 }}" required></label>
+                <label class="field-label">Teilpreis (€)<input name="part_price" type="number" min="0" step="0.01" value="{{ part['part_price'] if part else 0 }}" required></label>
+            </div>
+            <div class="part-cost-line"><span>Produktionskosten <strong data-part-cost>0,00 €</strong></span><span>Preisvorschlag <strong data-part-suggested-price>0,00 €</strong></span></div>
+        </div>
+        {% endfor %}
     </div>
     <div class="model-total"><span>Berechnete Druckkosten</span><strong data-model-total>0,00 €</strong></div>
     <div class="model-total recommended-price"><span>Empfohlener Verkaufspreis</span><strong data-recommended-price>0,00 €</strong></div>
     <div class="form-actions"><span class="form-hint">Den empfohlenen Preis kannst du oben anpassen.</span><button class="button button-green" type="submit">{% if model %}Änderungen speichern{% else %}Modell speichern{% endif %} <span>↗</span></button></div>
 </form>
-<template id="part-template"><div class="part-row" data-part-row><div class="part-row-heading"><strong>Teil <span data-part-number></span></strong><button class="icon-button icon-delete" type="button" data-remove-part title="Teil entfernen" aria-label="Teil entfernen">×</button></div><div class="form-grid"><label class="field-label">Name<input name="part_name" required placeholder="Bauteil"></label><label class="field-label">Filament<select name="material_id" required><option value="">Material wählen</option>{% for material in materials %}<option value="{{ material['id'] }}" data-price="{{ material['price_per_kg'] }}">{{ material['name'] }} · {{ material['price_per_kg']|euro }}/kg</option>{% endfor %}</select></label><label class="field-label">Drucker<select name="printer_id" required><option value="">Drucker wählen</option>{% for printer in printers %}<option value="{{ printer['id'] }}" data-rate="{{ printer_rates[printer['id']] }}">{{ printer['name'] }}</option>{% endfor %}</select></label><label class="field-label">Gewicht (g)<input name="weight_g" type="number" min="0" step="0.01" value="0" required></label><label class="field-label">Druckzeit (Stunden)<input name="print_hours" type="number" min="0" step="1" value="0" required></label><label class="field-label">Druckzeit (Minuten)<input name="print_minutes" type="number" min="0" max="59" step="1" value="0" required></label></div><div class="part-cost-line">Teilkosten <strong data-part-cost>0,00 €</strong></div></div></template>
+{% if model and not model_used %}<form class="model-delete-form" method="post" action="{{ url_for('main.delete_model', model_id=model['id']) }}" onsubmit="return confirm('Dieses Modell wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.')"><button class="button button-red" type="submit">Modell löschen</button></form>{% elif model_used %}<p class="form-hint">Dieses Modell wird in einem Verkauf verwendet und kann nicht gelöscht werden.</p>{% endif %}
+<template id="part-template">
+    <div class="part-row" data-part-row>
+        <div class="part-row-heading"><strong>Teil <span data-part-number></span></strong><button class="icon-button icon-delete" type="button" data-remove-part title="Teil entfernen" aria-label="Teil entfernen">×</button></div>
+        <div class="form-grid">
+            <label class="field-label">Name<input name="part_name" required placeholder="Bauteil"></label>
+            <label class="field-label">Filament<select name="material_id" required><option value="">Material wählen</option>{% for material in materials %}<option value="{{ material['id'] }}" data-price="{{ material['price_per_kg'] }}">{{ material['name'] }} · {{ material['price_per_kg']|euro }}/kg</option>{% endfor %}</select></label>
+            <label class="field-label">Drucker<select name="printer_id" required><option value="">Drucker wählen</option>{% for printer in printers %}<option value="{{ printer['id'] }}" data-rate="{{ printer_rates[printer['id']] }}">{{ printer['name'] }}</option>{% endfor %}</select></label>
+            <label class="field-label">Gewicht (g)<input name="weight_g" type="number" min="0" step="0.01" value="0" required></label>
+            <label class="field-label">Druckzeit (Stunden)<input name="print_hours" type="number" min="0" step="1" value="0" required></label>
+            <label class="field-label">Druckzeit (Minuten)<input name="print_minutes" type="number" min="0" max="59" step="1" value="0" required></label>
+            <label class="field-label">Teilpreis (€)<input name="part_price" type="number" min="0" step="0.01" value="0" required></label>
+        </div>
+        <div class="part-cost-line"><span>Produktionskosten <strong data-part-cost>0,00 €</strong></span><span>Preisvorschlag <strong data-part-suggested-price>0,00 €</strong></span></div>
+    </div>
+</template>
 <script>window.priceCalculatorFactor = {{ price_factor|tojson }};</script>
 {% endblock %}

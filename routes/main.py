@@ -10,6 +10,8 @@ from database.database import database
 
 main = Blueprint("main", __name__)
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+MONTH_NAMES = ("Januar", "Februar", "März", "April", "Mai", "Juni",
+               "Juli", "August", "September", "Oktober", "November", "Dezember")
 
 
 def money(value):
@@ -55,6 +57,25 @@ def model_cost(connection, model_id, material_id=None, printer_id=None):
         total += extras["additional_material_cost"]
         total += extras["additional_work_hours"] * extras["additional_hourly_cost"]
     return total
+
+
+def model_part_cost(connection, part_id, material_id=None, printer_id=None):
+    part = connection.execute(
+        """SELECT mp.*, m.price_per_kg, p.id AS default_printer_id
+        FROM model_parts mp JOIN materials m ON m.id=mp.material_id
+        JOIN printers p ON p.id=mp.printer_id WHERE mp.id=?""", (part_id,)
+    ).fetchone()
+    if part is None:
+        return 0.0
+    material_price = part["price_per_kg"]
+    if material_id:
+        material = connection.execute(
+            "SELECT price_per_kg FROM materials WHERE id=?", (material_id,)
+        ).fetchone()
+        if material:
+            material_price = material["price_per_kg"]
+    printer_cost = printer_hourly_cost(connection, printer_id or part["default_printer_id"])
+    return part["weight_g"] * material_price / 1000 + part["print_hours"] * printer_cost
 
 
 def model_extra_costs(form):
@@ -149,14 +170,16 @@ def sale_items(connection, sale):
     return [{"id": None, "model_id": sale["model_id"], "model_name": legacy_model["name"],
              "quantity": sale["quantity"], "material_id": sale["material_id"],
              "printer_id": sale["printer_id"], "item_price": sale["item_price"],
-             "printed": sale["printed"]}]
+             "printed": sale["printed"], "customer_note": "", "part_id": None,
+             "part_name": "", "part_cost": 0.0}]
 
 
 def sale_financials(connection, sale, items=None):
     items = items if items is not None else sale_items(connection, sale)
     income = sum(item["quantity"] * item["item_price"] for item in items)
     costs = sum(
-        model_cost(connection, item["model_id"], item["material_id"], item["printer_id"])
+        (item["part_cost"] if item["part_id"] else
+         model_cost(connection, item["model_id"], item["material_id"], item["printer_id"]))
         * item["quantity"] for item in items
     ) + sale["packaging_cost"]
     return {
@@ -178,6 +201,17 @@ def elapsed_months(year, today=None):
     return elapsed_days / (days_in_year / 12)
 
 
+def group_rows_by_month(rows, current_date):
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(row["date"][:7], []).append(row)
+    return [
+        {"label": f"{MONTH_NAMES[int(key[5:7]) - 1]} {key[:4]}",
+         "rows": month_rows, "open": key == current_date.strftime("%Y-%m")}
+        for key, month_rows in grouped.items()
+    ]
+
+
 def year_page(year, page):
     with database() as connection:
         exists = connection.execute("SELECT year FROM book_years WHERE year = ?", (year,)).fetchone()
@@ -196,6 +230,7 @@ def year_page(year, page):
                                    if year != current_date.year or row["date"] <= current_date.isoformat())
             average_monthly_expenses = monthly_expenses / elapsed_months(year, current_date)
             return render_template("expenses.html", year=year, years=years(connection), rows=rows,
+                                   month_groups=group_rows_by_month(rows, current_date),
                                    groups=groups, total=total, today=date.today().isoformat(),
                                    average_monthly_expenses=average_monthly_expenses,
                                    page_title="Ausgaben")
@@ -217,7 +252,10 @@ def year_page(year, page):
             row["order_gross"] = financials["gross"]
             row["order_costs"] = financials["costs"]
             row["order_profit"] = financials["profit"]
-            row["item_labels"] = ", ".join(f"{item['model_name']} × {item['quantity']}" for item in items)
+            row["item_labels"] = ", ".join(
+                f"{item['model_name']}{' · ' + item['part_name'] if item['part_id'] else ''} × {item['quantity']}"
+                for item in items
+            )
             rows.append(row)
             total_income += financials["income"]
             costs += financials["costs"]
@@ -229,6 +267,7 @@ def year_page(year, page):
         monthly_profit = sum(row["order_profit"] for row in monthly_rows) / month_divisor
         monthly_sales = len(monthly_rows) / month_divisor
         return render_template("sales.html", year=year, years=years(connection), rows=rows,
+                               month_groups=group_rows_by_month(rows, current_date),
                                total_income=total_income, total_cost=costs, groups=groups,
                                monthly_income=monthly_income, monthly_profit=monthly_profit,
                                monthly_sales=monthly_sales, total_profit=total_income - costs)
@@ -492,38 +531,86 @@ def delete_printer(printer_id):
 
 @main.route("/models")
 def model_list():
+    archive_view = request.args.get("archive") == "1"
     with database() as connection:
-        models = connection.execute(
-            """SELECT m.*,
+        categories = connection.execute("SELECT * FROM categories ORDER BY name").fetchall()
+        category_id = request.args.get("category", type=int)
+        category_ids = {category["id"] for category in categories}
+        if category_id not in category_ids:
+            category_id = None
+        query = """SELECT m.*,
             COALESCE((SELECT SUM(si.quantity) FROM sale_items si WHERE si.model_id=m.id),0) +
             COALESCE((SELECT SUM(s.quantity) FROM sales s WHERE s.model_id=m.id AND NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)),0) AS sold_units
-            FROM models m ORDER BY m.name"""
-        ).fetchall()
+            FROM models m WHERE m.archived=?"""
+        parameters = [int(archive_view)]
+        if category_id is not None:
+            query += " AND EXISTS (SELECT 1 FROM model_categories mc WHERE mc.model_id=m.id AND mc.category_id=?)"
+            parameters.append(category_id)
+        models = connection.execute(query + " ORDER BY m.name", parameters).fetchall()
+        model_ids = [model["id"] for model in models]
+        category_map = {model_id: [] for model_id in model_ids}
+        if model_ids:
+            placeholders = ",".join("?" for _ in model_ids)
+            for row in connection.execute(
+                f"""SELECT mc.model_id, c.id, c.name FROM model_categories mc
+                JOIN categories c ON c.id=mc.category_id
+                WHERE mc.model_id IN ({placeholders}) ORDER BY c.name""", model_ids
+            ):
+                category_map[row["model_id"]].append({"id": row["id"], "name": row["name"]})
         items = []
         for model in models:
             totals = connection.execute(
                 "SELECT COALESCE(SUM(weight_g),0) AS grams, COALESCE(SUM(print_hours),0) AS hours FROM model_parts WHERE model_id=?",
                 (model["id"],),
             ).fetchone()
-            items.append({"model": model, "grams": totals["grams"], "hours": totals["hours"],
+            model_data = dict(model)
+            model_data["categories"] = category_map[model["id"]]
+            items.append({"model": model_data, "grams": totals["grams"], "hours": totals["hours"],
                           "cost": model_cost(connection, model["id"])})
-    return render_template("models.html", models=items)
+    return render_template("models.html", models=items, categories=categories,
+                           selected_category=category_id, archive_view=archive_view)
+
+
+@main.post("/categories")
+def create_category():
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Bitte einen Kategorienamen eingeben.", "error")
+    else:
+        with database() as connection:
+            cursor = connection.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (name,))
+        flash("Kategorie gespeichert." if cursor.rowcount else "Diese Kategorie existiert bereits.",
+              "success" if cursor.rowcount else "error")
+    return redirect(url_for("main.model_list", archive=request.form.get("archive") or None,
+                            category=request.form.get("filter_category") or None))
+
+
+@main.post("/categories/<int:category_id>/delete")
+def delete_category(category_id):
+    with database() as connection:
+        cursor = connection.execute("DELETE FROM categories WHERE id=?", (category_id,))
+    if cursor.rowcount:
+        flash("Kategorie entfernt.", "success")
+    return redirect(url_for("main.model_list", archive=request.form.get("archive") or None,
+                            category=request.form.get("filter_category") or None))
 
 
 def part_form_rows(form):
     parts = []
     keys = zip(form.getlist("part_name"), form.getlist("material_id"), form.getlist("printer_id"),
-               form.getlist("weight_g"), form.getlist("print_hours"), form.getlist("print_minutes"))
-    for name, material, printer, weight, hours, minutes in keys:
+               form.getlist("weight_g"), form.getlist("print_hours"), form.getlist("print_minutes"),
+               form.getlist("part_price"))
+    for name, material, printer, weight, hours, minutes, part_price in keys:
         if not name.strip():
             continue
         weight_value = float(weight.replace(",", "."))
         hours_value = float(hours.replace(",", ".") or 0)
         minutes_value = int(minutes or 0)
-        if weight_value < 0 or hours_value < 0 or not 0 <= minutes_value < 60:
+        price_value = float(part_price.replace(",", ".") or 0)
+        if weight_value < 0 or hours_value < 0 or price_value < 0 or not 0 <= minutes_value < 60:
             raise ValueError
         parts.append((name.strip(), int(material), int(printer), weight_value,
-                      hours_value + minutes_value / 60))
+                      hours_value + minutes_value / 60, price_value))
     return parts
 
 
@@ -553,10 +640,54 @@ def model_form_parts(rows):
     return parts
 
 
+def save_model_categories(connection, model_id, category_ids):
+    connection.execute("DELETE FROM model_categories WHERE model_id=?", (model_id,))
+    connection.executemany(
+        "INSERT INTO model_categories (model_id, category_id) VALUES (?, ?)",
+        [(model_id, category_id) for category_id in category_ids],
+    )
+
+
+def sale_form_models(connection):
+    models = [dict(row) for row in connection.execute("SELECT * FROM models ORDER BY name")]
+    category_map = {model["id"]: [] for model in models}
+    if models:
+        placeholders = ",".join("?" for _ in models)
+        for row in connection.execute(
+            f"""SELECT mc.model_id, mc.category_id FROM model_categories mc
+            WHERE mc.model_id IN ({placeholders})""", [model["id"] for model in models]
+        ):
+            category_map[row["model_id"]].append(row["category_id"])
+    for model in models:
+        model["category_ids"] = category_map[model["id"]]
+        model["parts"] = [dict(row) for row in connection.execute(
+            "SELECT * FROM model_parts WHERE model_id=? ORDER BY name", (model["id"],)
+        )]
+        for part in model["parts"]:
+            part["production_cost"] = model_part_cost(connection, part["id"])
+    return models
+
+
+def sale_form_part_costs(connection, models, material_ids, printer_ids):
+    return {
+        str(part["id"]): {
+            f"{material_id or 0}:{printer_id or 0}": model_part_cost(
+                connection, part["id"], material_id, printer_id
+            )
+            for material_id in material_ids for printer_id in printer_ids
+        }
+        for model in models for part in model["parts"]
+    }
+
+
 @main.route("/models/new", methods=["GET", "POST"])
 def new_model():
     error = None
     form_values = {}
+    with database() as connection:
+        categories = connection.execute("SELECT * FROM categories ORDER BY name").fetchall()
+    valid_category_ids = {category["id"] for category in categories}
+    selected_category_ids = []
     if request.method == "POST":
         upload = request.files.get("image")
         try:
@@ -564,7 +695,9 @@ def new_model():
             price = float(request.form.get("sale_price", "0").replace(",", "."))
             extra_costs = model_extra_costs(request.form)
             parts = part_form_rows(request.form)
-            if not name or price < 0 or not parts:
+            selected_category_ids = [int(value) for value in request.form.getlist("category_ids")]
+            if (not name or price < 0 or not parts
+                    or not set(selected_category_ids).issubset(valid_category_ids)):
                 raise ValueError
             error = image_upload_error(upload)
             if error:
@@ -578,6 +711,7 @@ def new_model():
             return render_template("model_form.html", model=None, parts=[], materials=materials,
                                    printers=printer_list, printer_rates=printer_rates,
                                    price_factor=price_factor, error=error,
+                                   categories=categories, selected_category_ids=set(selected_category_ids),
                                    form_values=form_values), 400
         filename = save_model_image(upload) if upload and upload.filename else None
         with database() as connection:
@@ -589,15 +723,17 @@ def new_model():
             )
             model_id = cursor.lastrowid
             connection.executemany(
-                "INSERT INTO model_parts (model_id, name, material_id, printer_id, weight_g, print_hours) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO model_parts (model_id, name, material_id, printer_id, weight_g, print_hours, part_price) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [(model_id, *part) for part in parts],
             )
+            save_model_categories(connection, model_id, selected_category_ids)
         return redirect(url_for("main.model_detail", model_id=model_id))
     with database() as connection:
         materials, printer_list, printer_rates, price_factor = model_form_options(connection)
     return render_template("model_form.html", model=None, parts=[], materials=materials,
                            printers=printer_list, printer_rates=printer_rates,
-                           price_factor=price_factor, error=None, form_values=form_values)
+                           price_factor=price_factor, error=None, form_values=form_values,
+                           categories=categories, selected_category_ids=set())
 
 
 @main.route("/models/<int:model_id>/edit", methods=["GET", "POST"])
@@ -608,6 +744,18 @@ def edit_model(model_id):
         model = connection.execute("SELECT * FROM models WHERE id=?", (model_id,)).fetchone()
         if model is None:
             abort(404)
+        categories = connection.execute("SELECT * FROM categories ORDER BY name").fetchall()
+        valid_category_ids = {category["id"] for category in categories}
+        selected_category_ids = {
+            row["category_id"] for row in connection.execute(
+                "SELECT category_id FROM model_categories WHERE model_id=?", (model_id,)
+            )
+        }
+        model_used = connection.execute(
+            """SELECT EXISTS(SELECT 1 FROM sales WHERE model_id=?) OR
+            EXISTS(SELECT 1 FROM sale_items WHERE model_id=?) AS used""",
+            (model_id, model_id),
+        ).fetchone()["used"]
         parts = connection.execute("SELECT * FROM model_parts WHERE model_id=? ORDER BY id", (model_id,)).fetchall()
         if request.method == "POST":
             try:
@@ -615,7 +763,9 @@ def edit_model(model_id):
                 price = float(request.form.get("sale_price", "0").replace(",", "."))
                 extra_costs = model_extra_costs(request.form)
                 submitted_parts = part_form_rows(request.form)
-                if not name or price < 0 or not submitted_parts:
+                selected_category_ids = [int(value) for value in request.form.getlist("category_ids")]
+                if (not name or price < 0 or not submitted_parts
+                    or not set(selected_category_ids).issubset(valid_category_ids)):
                     raise ValueError
                 error = image_upload_error(upload)
                 if error:
@@ -634,9 +784,10 @@ def edit_model(model_id):
                 )
                 connection.execute("DELETE FROM model_parts WHERE model_id=?", (model_id,))
                 connection.executemany(
-                    "INSERT INTO model_parts (model_id,name,material_id,printer_id,weight_g,print_hours) VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO model_parts (model_id,name,material_id,printer_id,weight_g,print_hours,part_price) VALUES (?,?,?,?,?,?,?)",
                     [(model_id, *part) for part in submitted_parts],
                 )
+                save_model_categories(connection, model_id, selected_category_ids)
                 if image_filename != old_image:
                     remove_model_image(old_image)
                 flash("Modell aktualisiert.", "success")
@@ -646,7 +797,56 @@ def edit_model(model_id):
     return render_template("model_form.html", model=model, parts=display_parts,
                            materials=materials, printers=printer_list,
                            printer_rates=printer_rates, price_factor=price_factor,
-                           error=error, form_values=request.form if error else {})
+                           error=error, model_used=model_used,
+                           categories=categories, selected_category_ids=set(selected_category_ids),
+                           form_values=request.form if error else {})
+
+
+@main.post("/models/<int:model_id>/delete")
+def delete_model(model_id):
+    with database() as connection:
+        model = connection.execute("SELECT image_filename FROM models WHERE id=?", (model_id,)).fetchone()
+        if model is None:
+            abort(404)
+        used = connection.execute(
+            """SELECT EXISTS(SELECT 1 FROM sales WHERE model_id=?) OR
+            EXISTS(SELECT 1 FROM sale_items WHERE model_id=?) AS used""",
+            (model_id, model_id),
+        ).fetchone()["used"]
+        if used:
+            flash("Dieses Modell wird in einem Verkauf verwendet und kann nicht gelöscht werden.", "error")
+            return redirect(url_for("main.edit_model", model_id=model_id))
+        image_filename = model["image_filename"]
+        connection.execute("DELETE FROM models WHERE id=?", (model_id,))
+    remove_model_image(image_filename)
+    flash("Modell gelöscht.", "success")
+    return redirect(url_for("main.model_list"))
+
+
+@main.post("/models/<int:model_id>/archive")
+def archive_model(model_id):
+    with database() as connection:
+        model = connection.execute("SELECT id FROM models WHERE id=?", (model_id,)).fetchone()
+        if model is None:
+            abort(404)
+        connection.execute("UPDATE models SET archived=1 WHERE id=?", (model_id,))
+        connection.execute(
+            """UPDATE sales SET show_archived=1 WHERE model_id=? OR id IN
+            (SELECT sale_id FROM sale_items WHERE model_id=?)""",
+            (model_id, model_id),
+        )
+    flash("Modell ins Archiv verschoben. Betroffene Verkäufe zeigen archivierte Modelle an.", "success")
+    return redirect(url_for("main.model_detail", model_id=model_id))
+
+
+@main.post("/models/<int:model_id>/unarchive")
+def unarchive_model(model_id):
+    with database() as connection:
+        cursor = connection.execute("UPDATE models SET archived=0 WHERE id=?", (model_id,))
+        if cursor.rowcount == 0:
+            abort(404)
+    flash("Modell aus dem Archiv entfernt.", "success")
+    return redirect(url_for("main.model_detail", model_id=model_id))
 
 
 def remove_model_image(filename):
@@ -663,6 +863,10 @@ def model_detail(model_id):
         model = connection.execute("SELECT * FROM models WHERE id=?", (model_id,)).fetchone()
         if model is None:
             abort(404)
+        categories = connection.execute(
+            """SELECT c.name FROM categories c JOIN model_categories mc ON mc.category_id=c.id
+            WHERE mc.model_id=? ORDER BY c.name""", (model_id,)
+        ).fetchall()
         parts = connection.execute(
             """SELECT mp.*, m.name AS material_name, m.price_per_kg, m.material_type,
             p.name AS printer_name FROM model_parts mp JOIN materials m ON m.id=mp.material_id
@@ -683,7 +887,8 @@ def model_detail(model_id):
             COALESCE((SELECT SUM(quantity) FROM sales s WHERE s.model_id=? AND NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)),0)""",
             (model_id, model_id),
         ).fetchone()[0]
-    return render_template("model_detail.html", model=model, parts=computed, total_cost=total_cost,
+    return render_template("model_detail.html", model=model, categories=categories,
+                           parts=computed, total_cost=total_cost,
                            additional_material_cost=additional_material_cost,
                            additional_work_cost=additional_work_cost,
                            sold=sold, now_year=date.today().year)
@@ -808,36 +1013,71 @@ def create_sale(year):
         prices = request.form.getlist("item_price")
         materials = request.form.getlist("item_material_id")
         printers = request.form.getlist("item_printer_id")
+        customer_notes = request.form.getlist("item_customer_note")
+        part_ids = request.form.getlist("item_part_id")
+        category_ids = request.form.getlist("item_category_id")
         if not model_ids:
             model_ids = [request.form["model_id"]]
             quantities = [request.form.get("quantity", "1")]
             prices = [request.form.get("item_price", "0")]
             materials = [request.form.get("material_id", "")]
             printers = [request.form.get("printer_id", "")]
-        items = []
-        for model_value, quantity_value, price_value, material_value, printer_value in zip(
-            model_ids, quantities, prices, materials, printers
+            customer_notes = [""]
+        count = len(model_ids)
+        customer_notes = customer_notes or [""] * count
+        part_ids = part_ids or [""] * count
+        category_ids = category_ids or [""] * count
+        submitted_items = []
+        for model_value, quantity_value, price_value, material_value, printer_value, customer_note, part_value, category_value in zip(
+            model_ids, quantities, prices, materials, printers, customer_notes, part_ids, category_ids
         ):
             model_id = int(model_value)
             quantity = int(quantity_value)
             item_price = float(price_value.replace(",", "."))
             material_id = int(material_value) if material_value else None
             printer_id = int(printer_value) if printer_value else None
+            part_id = int(part_value) if part_value else None
+            category_id = int(category_value) if category_value else None
             if quantity < 1 or item_price < 0:
                 raise ValueError
-            items.append((model_id, quantity, material_id, printer_id, item_price))
+            submitted_items.append((model_id, part_id, category_id, quantity, material_id,
+                                    printer_id, item_price, customer_note.strip()))
         number_value = request.form.get("number", "").strip()
         sale_date = date.fromisoformat(request.form.get("date", date.today().isoformat()))
         shipping_date_value = request.form.get("shipping_date", "").strip()
         shipping_date = date.fromisoformat(shipping_date_value).isoformat() if shipping_date_value else ""
-        if sale_date.year != year or not items or len({len(model_ids), len(quantities), len(prices), len(materials), len(printers)}) != 1:
+        lengths = {len(model_ids), len(quantities), len(prices), len(materials), len(printers),
+                   len(customer_notes), len(part_ids), len(category_ids)}
+        if sale_date.year != year or not submitted_items or len(lengths) != 1:
             raise ValueError
     except (KeyError, ValueError):
         flash("Bitte mindestens eine gültige Modellposition und gültige Datumsangaben eintragen.", "error")
         return redirect(url_for("main.new_sale", year=year))
     with database() as connection:
-        if any(connection.execute("SELECT id FROM models WHERE id=?", (item[0],)).fetchone() is None for item in items):
-            abort(400)
+        items = []
+        for model_id, part_id, category_id, quantity, material_id, printer_id, item_price, customer_note in submitted_items:
+            model = connection.execute("SELECT id, archived FROM models WHERE id=?", (model_id,)).fetchone()
+            if model is None:
+                abort(400)
+            if model["archived"] and "show_archived" not in request.form:
+                flash("Aktiviere die Archivmodelle, um ein archiviertes Modell auszuwählen.", "error")
+                return redirect(url_for("main.new_sale", year=year))
+            if category_id and connection.execute(
+                "SELECT 1 FROM model_categories WHERE model_id=? AND category_id=?", (model_id, category_id)
+            ).fetchone() is None:
+                abort(400)
+            part_name = ""
+            part_cost = 0.0
+            if part_id:
+                part = connection.execute(
+                    "SELECT name FROM model_parts WHERE id=? AND model_id=?", (part_id, model_id)
+                ).fetchone()
+                if part is None:
+                    abort(400)
+                part_name = part["name"]
+                part_cost = model_part_cost(connection, part_id, material_id, printer_id)
+            items.append((model_id, part_id, part_name, part_cost, quantity, material_id,
+                          printer_id, item_price, customer_note))
         number = int(number_value) if number_value else connection.execute(
             "SELECT COALESCE(MAX(number), 0) + 1 FROM sales WHERE year=?", (year,)
         ).fetchone()[0]
@@ -854,21 +1094,22 @@ def create_sale(year):
             packaging = float(request.form.get("packaging_cost", "0").replace(",", ".") or 0)
             if packaging < 0:
                 raise ValueError
-            first_model, first_quantity, first_material, first_printer, first_price = items[0]
+            first_model, _, _, _, first_quantity, first_material, first_printer, first_price, _ = items[0]
             connection.execute(
                 """INSERT INTO sales (year, number, date, platform, company_name, customer_name, street, postal_code, city,
                 model_id, quantity, material_id, printer_id, item_price, shipping_method_id, shipping_price,
-                packaging_cost, note, shipping_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                packaging_cost, note, shipping_date, show_archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (year, number, sale_date.isoformat(), request.form.get("platform", "").strip(),
                  request.form.get("company_name", "").strip(), request.form.get("customer_name", "").strip(),
                  request.form.get("street", "").strip(),
                  request.form.get("postal_code", "").strip(), request.form.get("city", "").strip(),
                 first_model, first_quantity, first_material, first_printer, first_price, shipping_id, shipping_price, packaging,
-                 request.form.get("note", "").strip(), shipping_date),
+                 request.form.get("note", "").strip(), shipping_date,
+                 int("show_archived" in request.form)),
             )
             sale_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
             connection.executemany(
-                "INSERT INTO sale_items (sale_id, model_id, quantity, material_id, printer_id, item_price) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO sale_items (sale_id, model_id, part_id, part_name, part_cost, quantity, material_id, printer_id, item_price, customer_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [(sale_id, *item) for item in items],
             )
         except ValueError:
@@ -881,7 +1122,8 @@ def create_sale(year):
 @main.route("/years/<int:year>/sales/new", methods=["GET"])
 def new_sale(year):
     with database() as connection:
-        models = connection.execute("SELECT * FROM models ORDER BY name").fetchall()
+        models = sale_form_models(connection)
+        categories = connection.execute("SELECT * FROM categories ORDER BY name").fetchall()
         material_list = connection.execute("SELECT * FROM materials WHERE active=1 ORDER BY name").fetchall()
         printer_list = connection.execute("SELECT * FROM printers WHERE active=1 ORDER BY name").fetchall()
         shipping = connection.execute("SELECT * FROM shipping_methods WHERE year=? ORDER BY name", (year,)).fetchall()
@@ -892,8 +1134,11 @@ def new_sale(year):
                     "printers": [dict(row) for row in connection.execute(
                         "SELECT DISTINCT p.id, p.name FROM model_parts mp JOIN printers p ON p.id=mp.printer_id WHERE mp.model_id=?", (model["id"],))]}
                     for model in models}
+        model_category_map = {str(model["id"]): model["category_ids"] for model in models}
+        archived_model_ids = [str(model["id"]) for model in models if model["archived"]]
         material_ids = [None] + [item["id"] for item in material_list]
         printer_ids = [None] + [item["id"] for item in printer_list]
+        part_costs = sale_form_part_costs(connection, models, material_ids, printer_ids)
         model_costs = {
             str(model["id"]): {
                 f"{material_id or 0}:{printer_id or 0}": model_cost(connection, model["id"], material_id, printer_id)
@@ -908,7 +1153,10 @@ def new_sale(year):
     return render_template("sale_form.html", year=year, models=models, materials=material_list,
                            printers=printer_list, shipping=shipping, next_number=next_number,
                            defaults=defaults, model_costs=model_costs, today=date.today().isoformat(),
-                           sale=None, items=[], known_customers=known_customers)
+                           sale=None, items=[], known_customers=known_customers,
+                           categories=categories, show_archived=False, item_notes=[],
+                           model_category_map=model_category_map, archived_model_ids=archived_model_ids,
+                           part_costs=part_costs)
 
 
 @main.route("/sales/<int:sale_id>/edit", methods=["GET", "POST"])
@@ -929,23 +1177,60 @@ def edit_sale(sale_id):
                 prices = request.form.getlist("item_price")
                 materials = request.form.getlist("item_material_id")
                 printers = request.form.getlist("item_printer_id")
+                customer_notes = request.form.getlist("item_customer_note")
+                part_ids = request.form.getlist("item_part_id")
+                category_ids = request.form.getlist("item_category_id")
+                customer_notes = customer_notes or [""] * len(model_ids)
+                part_ids = part_ids or [""] * len(model_ids)
+                category_ids = category_ids or [""] * len(model_ids)
                 if (sale_date.year != sale["year"] or number < 1 or packaging < 0 or not model_ids
-                        or len({len(model_ids), len(quantities), len(prices), len(materials), len(printers)}) != 1):
+                        or len({len(model_ids), len(quantities), len(prices), len(materials), len(printers),
+                                len(customer_notes), len(part_ids), len(category_ids)}) != 1):
                     raise ValueError
                 submitted_items = []
-                for model_value, quantity_value, price_value, material_value, printer_value in zip(
-                    model_ids, quantities, prices, materials, printers
+                old_items = connection.execute(
+                    "SELECT printed, model_id, part_id, part_name, part_cost FROM sale_items WHERE sale_id=? ORDER BY id",
+                    (sale_id,),
+                ).fetchall()
+                for model_value, quantity_value, price_value, material_value, printer_value, customer_note, part_value, category_value in zip(
+                    model_ids, quantities, prices, materials, printers, customer_notes, part_ids, category_ids
                 ):
                     model_id = int(model_value)
                     quantity = int(quantity_value)
                     price = float(price_value.replace(",", "."))
-                    if quantity < 1 or price < 0 or connection.execute(
-                        "SELECT id FROM models WHERE id=?", (model_id,)
+                    part_id = int(part_value) if part_value else None
+                    category_id = int(category_value) if category_value else None
+                    model_row = connection.execute(
+                        "SELECT id, archived FROM models WHERE id=?", (model_id,)
+                    ).fetchone()
+                    if (quantity < 1 or price < 0 or model_row is None
+                            or (model_row["archived"] and "show_archived" not in request.form)):
+                        raise ValueError
+                    if category_id and connection.execute(
+                        "SELECT 1 FROM model_categories WHERE model_id=? AND category_id=?",
+                        (model_id, category_id),
                     ).fetchone() is None:
                         raise ValueError
-                    submitted_items.append((model_id, quantity,
-                                            int(material_value) if material_value else None,
-                                            int(printer_value) if printer_value else None, price))
+                    material_id = int(material_value) if material_value else None
+                    printer_id = int(printer_value) if printer_value else None
+                    part_name = ""
+                    part_cost = 0.0
+                    if part_id:
+                        part = connection.execute(
+                            "SELECT name FROM model_parts WHERE id=? AND model_id=?", (part_id, model_id)
+                        ).fetchone()
+                        if part:
+                            part_name = part["name"]
+                            part_cost = model_part_cost(connection, part_id, material_id, printer_id)
+                        else:
+                            old_part = next((row for row in old_items
+                                             if row["part_id"] == part_id and row["model_id"] == model_id), None)
+                            if old_part is None:
+                                raise ValueError
+                            part_name = old_part["part_name"]
+                            part_cost = old_part["part_cost"]
+                    submitted_items.append((model_id, part_id, part_name, part_cost, quantity,
+                                            material_id, printer_id, price, customer_note.strip()))
                 duplicate = connection.execute(
                     "SELECT id FROM sales WHERE year=? AND number=? AND id<>?",
                     (sale["year"], number, sale_id),
@@ -964,31 +1249,30 @@ def edit_sale(sale_id):
             except (KeyError, TypeError, ValueError):
                 flash("Bitte gültige Auftrags-, Datums- und Positionsdaten eingeben.", "error")
                 return redirect(url_for("main.edit_sale", sale_id=sale_id))
-            old_items = connection.execute(
-                "SELECT printed FROM sale_items WHERE sale_id=? ORDER BY id", (sale_id,)
-            ).fetchall()
-            first_model, first_quantity, first_material, first_printer, first_price = submitted_items[0]
+            first_model, _, _, _, first_quantity, first_material, first_printer, first_price, _ = submitted_items[0]
             connection.execute(
                 """UPDATE sales SET number=?, date=?, shipping_date=?, platform=?, company_name=?, customer_name=?, street=?,
                 postal_code=?, city=?, model_id=?, quantity=?, material_id=?, printer_id=?, item_price=?,
-                shipping_method_id=?, shipping_price=?, packaging_cost=?, note=? WHERE id=?""",
+                shipping_method_id=?, shipping_price=?, packaging_cost=?, note=?, show_archived=? WHERE id=?""",
                 (number, sale_date.isoformat(), shipping_date, request.form.get("platform", "").strip(),
                  request.form.get("company_name", "").strip(), request.form.get("customer_name", "").strip(),
                  request.form.get("street", "").strip(),
                  request.form.get("postal_code", "").strip(), request.form.get("city", "").strip(),
                  first_model, first_quantity, first_material, first_printer, first_price, shipping_id,
-                 shipping_price, packaging, request.form.get("note", "").strip(), sale_id),
+                 shipping_price, packaging, request.form.get("note", "").strip(),
+                 int("show_archived" in request.form), sale_id),
             )
             connection.execute("DELETE FROM sale_items WHERE sale_id=?", (sale_id,))
             connection.executemany(
-                "INSERT INTO sale_items (sale_id, model_id, quantity, material_id, printer_id, item_price, printed) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO sale_items (sale_id, model_id, part_id, part_name, part_cost, quantity, material_id, printer_id, item_price, customer_note, printed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [(sale_id, *item, old_items[index]["printed"] if index < len(old_items) else 0)
                  for index, item in enumerate(submitted_items)],
             )
             flash(f"Auftrag {number:03d} aktualisiert.", "success")
             return redirect(url_for("main.sales", year=sale["year"]))
 
-        models = connection.execute("SELECT * FROM models ORDER BY name").fetchall()
+        models = sale_form_models(connection)
+        categories = connection.execute("SELECT * FROM categories ORDER BY name").fetchall()
         material_list = connection.execute("SELECT * FROM materials WHERE active=1 ORDER BY name").fetchall()
         printer_list = connection.execute("SELECT * FROM printers WHERE active=1 ORDER BY name").fetchall()
         shipping = connection.execute("SELECT * FROM shipping_methods WHERE year=? ORDER BY name", (sale["year"],)).fetchall()
@@ -999,8 +1283,11 @@ def edit_sale(sale_id):
                     "printers": [dict(row) for row in connection.execute(
                         "SELECT DISTINCT p.id, p.name FROM model_parts mp JOIN printers p ON p.id=mp.printer_id WHERE mp.model_id=?", (model["id"],))]}
                     for model in models}
+        model_category_map = {str(model["id"]): model["category_ids"] for model in models}
+        archived_model_ids = [str(model["id"]) for model in models if model["archived"]]
         material_ids = [None] + [item["id"] for item in material_list]
         printer_ids = [None] + [item["id"] for item in printer_list]
+        part_costs = sale_form_part_costs(connection, models, material_ids, printer_ids)
         model_costs = {str(model["id"]): {
             f"{material_id or 0}:{printer_id or 0}": model_cost(connection, model["id"], material_id, printer_id)
             for material_id in material_ids for printer_id in printer_ids
@@ -1015,7 +1302,11 @@ def edit_sale(sale_id):
     return render_template("sale_form.html", year=sale["year"], sale=sale, items=items, models=models,
                            materials=material_list, printers=printer_list, shipping=shipping,
                            next_number=next_number, defaults=defaults, model_costs=model_costs,
-                           today=date.today().isoformat(), known_customers=known_customers)
+                           today=date.today().isoformat(), known_customers=known_customers,
+                           categories=categories, show_archived=bool(sale["show_archived"]),
+                           item_notes=[item["customer_note"] for item in items],
+                           model_category_map=model_category_map, archived_model_ids=archived_model_ids,
+                           part_costs=part_costs)
 
 
 @main.post("/sales/<int:sale_id>/status")

@@ -27,10 +27,12 @@ if (partList) {
             const materialCost = grams * (Number(material.selectedOptions[0]?.dataset.price) || 0) / 1000;
             const printerCost = hours * (Number(printer.selectedOptions[0]?.dataset.rate) || 0);
             const rowCost = materialCost + printerCost;
+            const suggestedPartPrice = materialCost + hours * priceFactor;
             total += rowCost;
             materialTotal += materialCost;
             hoursTotal += hours;
             row.querySelector('[data-part-cost]').textContent = euro.format(rowCost);
+            row.querySelector('[data-part-suggested-price]').textContent = euro.format(suggestedPartPrice);
         });
         const additionalCost = numberValue(extraMaterialCost)
             + numberValue(extraWorkHours) * numberValue(extraHourlyCost);
@@ -64,10 +66,14 @@ if (saleItems) {
     const addItem = document.querySelector('[data-add-item]');
     const shipping = document.querySelector('#shipping-method');
     const packaging = document.querySelector('#packaging-cost');
+    const showArchived = document.querySelector('#show-archived');
     const totalOutput = document.querySelector('[data-live-total]');
     const profitOutput = document.querySelector('[data-live-profit]');
     const defaults = window.saleDefaults || {};
     const costs = window.saleCosts || {};
+    const partCosts = window.salePartCosts || {};
+    const modelCategories = window.saleModelCategories || {};
+    const archivedModels = new Set(window.saleArchivedModelIds || []);
     const customerName = document.querySelector('[name="customer_name"]');
     const knownCustomers = document.querySelector('#known-customer-names');
 
@@ -86,6 +92,11 @@ if (saleItems) {
         return Number(choices[`${materialId || 0}:${printerId || 0}`] ?? choices['0:0'] ?? 0);
     };
 
+    const selectedPartCost = (partId, materialId, printerId, fallback) => {
+        const choices = partCosts[partId] || {};
+        return Number(choices[`${materialId || 0}:${printerId || 0}`] ?? fallback ?? 0);
+    };
+
     const updateOrder = () => {
         let orderTotal = Number(shipping.selectedOptions[0]?.dataset.price) || 0;
         let orderProfit = -numberValue(packaging);
@@ -96,7 +107,10 @@ if (saleItems) {
             const price = numberValue(row.querySelector('.item-price'));
             const materialId = row.querySelector('.item-material').value;
             const printerId = row.querySelector('.item-printer').value;
-            const cost = selectedCost(model.value, materialId, printerId);
+            const part = row.querySelector('.item-part').selectedOptions[0];
+            const cost = part?.value
+                ? selectedPartCost(part.value, materialId, printerId, part.dataset.cost)
+                : selectedCost(model.value, materialId, printerId);
             const lineTotal = quantity * price;
             orderTotal += lineTotal;
             orderProfit += quantity * (price - cost);
@@ -113,10 +127,45 @@ if (saleItems) {
         profitOutput.classList.toggle('positive', orderProfit >= 0);
     };
 
+    const filterModels = (row) => {
+        const model = row.querySelector('.item-model');
+        const category = row.querySelector('.item-category');
+        let clearSelection = false;
+        [...model.options].forEach((option) => {
+            if (!option.value) return;
+            const categoryMatches = !category.value
+                || (modelCategories[option.value] || []).some((id) => String(id) === category.value);
+            const archiveMatches = showArchived.checked || !archivedModels.has(option.value);
+            const visible = categoryMatches && archiveMatches;
+            option.hidden = !visible;
+            option.disabled = !visible;
+            if (option.selected && !visible) clearSelection = true;
+        });
+        if (clearSelection) {
+            model.value = '';
+            row.querySelector('.item-part').value = '';
+            row.querySelector('.item-price').value = '0';
+        }
+        filterParts(row);
+    };
+
+    const filterParts = (row) => {
+        const modelId = row.querySelector('.item-model').value;
+        const part = row.querySelector('.item-part');
+        [...part.options].forEach((option) => {
+            if (!option.value) return;
+            const visible = option.dataset.model === modelId;
+            option.hidden = !visible;
+            option.disabled = !visible;
+            if (!visible && option.selected) part.value = '';
+        });
+    };
+
     const updateModel = (row) => {
         const model = row.querySelector('.item-model');
         const selected = model.selectedOptions[0];
         const modelDefaults = defaults[model.value];
+        row.querySelector('.item-part').value = '';
         row.querySelector('.item-price').value = selected?.dataset.price || '0';
         row.querySelector('.item-material').value = '';
         row.querySelector('.item-printer').value = '';
@@ -128,14 +177,35 @@ if (saleItems) {
         } else {
             note.textContent = 'Modell wählen, um Standardwerte anzuzeigen.';
         }
+        filterParts(row);
         updateOrder();
     };
 
+    const updatePart = (row) => {
+        const part = row.querySelector('.item-part').selectedOptions[0];
+        const model = row.querySelector('.item-model').selectedOptions[0];
+        row.querySelector('.item-price').value = part?.value
+            ? part.dataset.price || '0'
+            : model?.dataset.price || '0';
+        updateOrder();
+    };
+
+    saleItems.querySelectorAll('[data-sale-item]').forEach((row) => {
+        filterModels(row);
+        filterParts(row);
+    });
     saleItems.addEventListener('change', (event) => {
         const row = event.target.closest('[data-sale-item]');
-        if (row && event.target.matches('.item-model')) updateModel(row);
+        if (!row) return;
+        if (event.target.matches('.item-category')) filterModels(row);
+        else if (event.target.matches('.item-model')) updateModel(row);
+        else if (event.target.matches('.item-part')) updatePart(row);
         else updateOrder();
     });
+    showArchived.addEventListener('change', () => {
+        saleItems.querySelectorAll('[data-sale-item]').forEach(filterModels);
+    });
+
     saleItems.addEventListener('input', updateOrder);
     saleItems.addEventListener('click', (event) => {
         const remove = event.target.closest('[data-remove-item]');
@@ -149,10 +219,14 @@ if (saleItems) {
         newItem.querySelector('.item-model').value = '';
         newItem.querySelector('.item-quantity').value = '1';
         newItem.querySelector('.item-price').value = '0';
+        newItem.querySelector('.item-category').value = '';
+        newItem.querySelector('.item-part').value = '';
         newItem.querySelector('.item-material').value = '';
         newItem.querySelector('.item-printer').value = '';
+        newItem.querySelector('[name="item_customer_note"]').value = '';
         newItem.querySelector('[data-item-default-note]').textContent = 'Modell wählen, um Standardwerte anzuzeigen.';
         saleItems.append(newItem);
+        filterModels(newItem);
         updateOrder();
     });
     shipping.addEventListener('change', updateOrder);

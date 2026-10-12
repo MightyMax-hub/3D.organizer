@@ -78,8 +78,11 @@
         </div>
     </div>
     {% if rows %}
-    <div class="orders-list">
-        {% for row in rows %}
+    {% for month in month_groups %}
+    <details class="month-group" {% if month['open'] %}open{% endif %}>
+        <summary>{{ month['label'] }}</summary>
+        <div class="orders-list">
+        {% for row in month['rows'] %}
         <article class="order-row">
             <div class="order-number">
                 <span>
@@ -100,8 +103,9 @@
                     {% for item in row['items'] %}
                     <div class="order-line">
                         <span>
-                            {{ item['model_name'] }} × {{ item['quantity'] }} · {{ (item['quantity']*item['item_price'])|euro }}
+                            {{ item['model_name'] }}{% if item['part_id'] %} · {{ item['part_name'] }}{% endif %} × {{ item['quantity'] }} · {{ (item['quantity']*item['item_price'])|euro }}
                         </span>
+                        {% if item['customer_note'] %}<small class="order-line-note">{{ item['customer_note'] }}</small>{% endif %}
                     </div>
                     {% endfor %}
                 </div>
@@ -137,7 +141,9 @@
             </div>
         </article>
         {% endfor %}
-    </div>
+        </div>
+    </details>
+    {% endfor %}
     {% else %}
     <p class="empty-note">
         Noch keine Verkäufe in {{ year }} erfasst.
