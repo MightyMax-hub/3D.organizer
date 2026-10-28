@@ -201,13 +201,14 @@ def elapsed_months(year, today=None):
     return elapsed_days / (days_in_year / 12)
 
 
-def group_rows_by_month(rows, current_date):
+def group_rows_by_month(rows, current_date, amount_key):
     grouped = {}
     for row in rows:
         grouped.setdefault(row["date"][:7], []).append(row)
     return [
         {"label": f"{MONTH_NAMES[int(key[5:7]) - 1]} {key[:4]}",
-         "rows": month_rows, "open": key == current_date.strftime("%Y-%m")}
+         "rows": month_rows, "total": sum(row[amount_key] for row in month_rows),
+         "open": key == current_date.strftime("%Y-%m")}
         for key, month_rows in grouped.items()
     ]
 
@@ -230,7 +231,7 @@ def year_page(year, page):
                                    if year != current_date.year or row["date"] <= current_date.isoformat())
             average_monthly_expenses = monthly_expenses / elapsed_months(year, current_date)
             return render_template("expenses.html", year=year, years=years(connection), rows=rows,
-                                   month_groups=group_rows_by_month(rows, current_date),
+                                   month_groups=group_rows_by_month(rows, current_date, "amount"),
                                    groups=groups, total=total, today=date.today().isoformat(),
                                    average_monthly_expenses=average_monthly_expenses,
                                    page_title="Ausgaben")
@@ -252,10 +253,6 @@ def year_page(year, page):
             row["order_gross"] = financials["gross"]
             row["order_costs"] = financials["costs"]
             row["order_profit"] = financials["profit"]
-            row["item_labels"] = ", ".join(
-                f"{item['model_name']}{' · ' + item['part_name'] if item['part_id'] else ''} × {item['quantity']}"
-                for item in items
-            )
             rows.append(row)
             total_income += financials["income"]
             costs += financials["costs"]
@@ -267,7 +264,7 @@ def year_page(year, page):
         monthly_profit = sum(row["order_profit"] for row in monthly_rows) / month_divisor
         monthly_sales = len(monthly_rows) / month_divisor
         return render_template("sales.html", year=year, years=years(connection), rows=rows,
-                               month_groups=group_rows_by_month(rows, current_date),
+                               month_groups=group_rows_by_month(rows, current_date, "order_income"),
                                total_income=total_income, total_cost=costs, groups=groups,
                                monthly_income=monthly_income, monthly_profit=monthly_profit,
                                monthly_sales=monthly_sales, total_profit=total_income - costs)
@@ -309,27 +306,53 @@ def dashboard():
         ).fetchall()
         overall_income = sum(item["income"] for item in totals)
         overall_expenses = sum(item["expenses"] for item in totals)
-        models = connection.execute(
-            """SELECT m.*,
-            COALESCE((SELECT SUM(si.quantity) FROM sale_items si WHERE si.model_id=m.id),0) +
-            COALESCE((SELECT SUM(s.quantity) FROM sales s WHERE s.model_id=m.id AND NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)),0) AS sold_units
-            FROM models m ORDER BY m.name COLLATE NOCASE"""
-        ).fetchall()
+        categories = connection.execute("SELECT * FROM categories ORDER BY name").fetchall()
+        category_id = request.args.get("category", type=int)
+        if category_id not in {category["id"] for category in categories}:
+            category_id = None
+        query = "SELECT m.* FROM models m"
+        parameters = []
+        if category_id is not None:
+            query += " WHERE EXISTS (SELECT 1 FROM model_categories mc WHERE mc.model_id=m.id AND mc.category_id=?)"
+            parameters.append(category_id)
+        models = connection.execute(query + " ORDER BY m.name COLLATE NOCASE", parameters).fetchall()
         model_overview = []
         for model in models:
-            details = connection.execute(
-                "SELECT COALESCE(SUM(weight_g), 0) AS grams, COALESCE(SUM(print_hours), 0) AS hours FROM model_parts WHERE model_id = ?",
-                (model["id"],),
-            ).fetchone()
-            sold_units = model["sold_units"]
-            model_overview.append({"model": model, "grams": details["grams"] * sold_units,
-                                   "hours": details["hours"] * sold_units,
-                                   "cost": model_cost(connection, model["id"]) * sold_units})
+            parts = {part["id"]: part for part in connection.execute(
+                "SELECT id, weight_g, print_hours FROM model_parts WHERE model_id=?", (model["id"],)
+            ).fetchall()}
+            whole_grams = sum(part["weight_g"] for part in parts.values())
+            whole_hours = sum(part["print_hours"] for part in parts.values())
+            whole_cost = model_cost(connection, model["id"])
+            sold_units = grams = hours = cost = 0
+            sold_rows = connection.execute(
+                "SELECT quantity, part_id, part_cost FROM sale_items WHERE model_id=?", (model["id"],)
+            ).fetchall() + connection.execute(
+                """SELECT quantity, NULL AS part_id, 0 AS part_cost FROM sales s WHERE model_id=?
+                AND NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)""", (model["id"],)
+            ).fetchall()
+            for row in sold_rows:
+                quantity = row["quantity"]
+                sold_units += quantity
+                part = parts.get(row["part_id"]) if row["part_id"] else None
+                if part:
+                    grams += part["weight_g"] * quantity
+                    hours += part["print_hours"] * quantity
+                    cost += row["part_cost"] * quantity
+                elif row["part_id"]:
+                    cost += row["part_cost"] * quantity
+                else:
+                    grams += whole_grams * quantity
+                    hours += whole_hours * quantity
+                    cost += whole_cost * quantity
+            model_overview.append({"model": dict(model, sold_units=sold_units), "grams": grams,
+                                   "hours": hours, "cost": cost})
         available_years = years(connection)
     return render_template("dashboard.html", year=current_year, years=available_years,
                            income=sales, expenses=expenses, profit=sales - expenses,
                            filament_kg=filament[0], filament_cost=filament[1],
                            top_groups=top_groups, totals=totals, models=model_overview,
+                           categories=categories, selected_category=category_id,
                            overall_income=overall_income, overall_expenses=overall_expenses)
 
 
@@ -581,6 +604,8 @@ def create_category():
             cursor = connection.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (name,))
         flash("Kategorie gespeichert." if cursor.rowcount else "Diese Kategorie existiert bereits.",
               "success" if cursor.rowcount else "error")
+    if request.form.get("next") == "dashboard":
+        return redirect(url_for("main.dashboard"))
     return redirect(url_for("main.model_list", archive=request.form.get("archive") or None,
                             category=request.form.get("filter_category") or None))
 
@@ -882,13 +907,14 @@ def model_detail(model_id):
         additional_material_cost = model["additional_material_cost"]
         additional_work_cost = model["additional_work_hours"] * model["additional_hourly_cost"]
         total_cost = sum(row["total"] for row in computed) + additional_material_cost + additional_work_cost
+        total_hours = sum(row["part"]["print_hours"] for row in computed)
         sold = connection.execute(
             """SELECT COALESCE((SELECT SUM(quantity) FROM sale_items WHERE model_id=?),0) +
             COALESCE((SELECT SUM(quantity) FROM sales s WHERE s.model_id=? AND NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)),0)""",
             (model_id, model_id),
         ).fetchone()[0]
     return render_template("model_detail.html", model=model, categories=categories,
-                           parts=computed, total_cost=total_cost,
+                           parts=computed, total_cost=total_cost, total_hours=total_hours,
                            additional_material_cost=additional_material_cost,
                            additional_work_cost=additional_work_cost,
                            sold=sold, now_year=date.today().year)
@@ -1656,9 +1682,30 @@ def invoice(sale_id):
     pdf.setFont("Helvetica", 10)
     pdf.drawString(52, height - 359, "Im Folgenden der/die erworbene/n Artikel, die ich in Rechnung stelle:")
     y = height - 394
-    positions = [(item["model_name"], item["quantity"], item["item_price"]) for item in items]
+    positions = []
+    description_width = width - 224 - 91 - 12
+    for item in items:
+        description_lines = [
+            (line, 9) for line in simpleSplit(item["model_name"], "Helvetica", 9, description_width)
+        ]
+        if item["part_id"]:
+            description_lines.extend(
+                (line, 8) for line in simpleSplit(
+                    f"Teil: {item['part_name']}", "Helvetica", 8, description_width
+                )
+            )
+        if item["customer_note"]:
+            description_lines.extend(
+                (line, 8) for line in simpleSplit(
+                    f"Kundenwunsch: {item['customer_note']}", "Helvetica", 8, description_width
+                )
+            )
+        positions.append((description_lines, item["quantity"], item["item_price"]))
     if sale["shipping_price"]:
-        positions.append((f"Versand: {sale['shipping_name'] or 'Versand'}", 1, sale["shipping_price"]))
+        shipping_label = f"Versand: {sale['shipping_name'] or 'Versand'}"
+        positions.append(([
+            (line, 9) for line in simpleSplit(shipping_label, "Helvetica", 9, description_width)
+        ], 1, sale["shipping_price"]))
     item_sum = sum(quantity * price for _, quantity, price in positions)
 
     def draw_table_header(top):
@@ -1676,8 +1723,7 @@ def invoice(sale_id):
     draw_table_header(y)
     y -= 42
     pdf.setFont("Helvetica", 9)
-    for position, (label, quantity, price) in enumerate(positions, start=1):
-        description_lines = simpleSplit(label, "Helvetica", 9, width - 91 - (width - 224) - 16)
+    for position, (description_lines, quantity, price) in enumerate(positions, start=1):
         row_height = max(22, len(description_lines) * 12 + 8)
         if y - row_height < content_bottom + 15:
             pdf.showPage()
@@ -1686,8 +1732,10 @@ def invoice(sale_id):
             y -= 42
             pdf.setFont("Helvetica", 9)
         pdf.drawString(59, y, str(position))
-        for line_index, line in enumerate(description_lines):
+        for line_index, (line, font_size) in enumerate(description_lines):
+            pdf.setFont("Helvetica", font_size)
             pdf.drawString(91, y - line_index * 12, line)
+        pdf.setFont("Helvetica", 9)
         pdf.drawRightString(width - 224, y, f"{quantity} Stk")
         pdf.drawRightString(width - 130, y, money(price))
         pdf.drawRightString(width - 59, y, money(quantity * price))

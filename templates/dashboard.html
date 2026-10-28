@@ -209,40 +209,54 @@
             </span>
         </a>
     </div>
+    <section class="category-toolbar" aria-label="Kategorien verwalten und filtern">
+        <form class="category-create" method="post" action="{{ url_for('main.create_category') }}">
+            <input type="hidden" name="next" value="dashboard">
+            <label class="sr-only" for="new-category">Neue Kategorie</label>
+            <input id="new-category" name="name" placeholder="Neue Kategorie" required>
+            <button class="button button-muted" type="submit">Kategorie hinzufügen</button>
+        </form>
+        <nav class="category-filters" aria-label="Modelle nach Kategorie filtern">
+            <a class="category-filter {% if not selected_category %}active{% endif %}" href="{{ url_for('main.dashboard') }}">Alle</a>
+            {% for category in categories %}
+            <a class="category-filter {% if selected_category==category['id'] %}active{% endif %}" href="{{ url_for('main.dashboard', category=category['id']) }}">{{ category['name'] }}</a>
+            {% endfor %}
+        </nav>
+    </section>
     {% if models %}
-    <div class="data-table model-overview-table">
-        <div class="data-head">
+    <div class="data-table model-overview-table" data-model-overview>
+        <div class="data-head" role="row">
             <span>
-                MODELL
+                <button class="table-sort" type="button" data-sort-key="name" data-sort-type="text" data-sort-label="Modellname" aria-label="Nach Modellname sortieren">MODELL <span class="sort-indicator" aria-hidden="true"></span></button>
             </span>
             <span>
-                VERKAUFT
+                <button class="table-sort" type="button" data-sort-key="sold" data-sort-type="number" data-sort-label="Verkaufszahl" aria-label="Nach Verkaufszahl sortieren">VERKAUFT <span class="sort-indicator" aria-hidden="true"></span></button>
             </span>
             <span>
-                DRUCKZEIT GESAMT
+                <button class="table-sort" type="button" data-sort-key="hours" data-sort-type="number" data-sort-label="Druckzeit" aria-label="Nach Druckzeit sortieren">DRUCKZEIT GESAMT <span class="sort-indicator" aria-hidden="true"></span></button>
             </span>
             <span>
-                MATERIAL GESAMT
+                <button class="table-sort" type="button" data-sort-key="grams" data-sort-type="number" data-sort-label="Materialmenge" aria-label="Nach Materialmenge sortieren">MATERIAL GESAMT <span class="sort-indicator" aria-hidden="true"></span></button>
             </span>
             <span>
-                DRUCKKOSTEN GESAMT
+                <button class="table-sort" type="button" data-sort-key="cost" data-sort-type="number" data-sort-label="Druckkosten" aria-label="Nach Druckkosten sortieren">DRUCKKOSTEN GESAMT <span class="sort-indicator" aria-hidden="true"></span></button>
             </span>
         </div>
         {% for item in models %}
         <a class="data-row" href="{{ url_for('main.model_detail', model_id=item['model']['id']) }}">
-            <strong>
+            <strong data-sort-value="{{ item['model']['name'] }}">
                 {{ item['model']['name'] }}
             </strong>
-            <span>
+            <span data-sort-value="{{ item['model']['sold_units'] }}">
                 {{ item['model']['sold_units'] }} Stk.
             </span>
-            <span>
+            <span data-sort-value="{{ item['hours'] }}">
                 {{ '%.1f'|format(item['hours']) }} h
             </span>
-            <span>
+            <span data-sort-value="{{ item['grams'] }}">
                 {{ '%.0f'|format(item['grams']) }} g
             </span>
-            <span>
+            <span data-sort-value="{{ item['cost'] }}">
                 {{ item['cost']|euro }}
             </span>
         </a>

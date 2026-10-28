@@ -80,7 +80,7 @@
     {% if rows %}
     {% for month in month_groups %}
     <details class="month-group" {% if month['open'] %}open{% endif %}>
-        <summary>{{ month['label'] }}</summary>
+        <summary><span>{{ month['label'] }}</span><strong>{{ month['total']|euro }}</strong></summary>
         <div class="orders-list">
         {% for row in month['rows'] %}
         <article class="order-row">
@@ -96,9 +96,7 @@
                 <div class="order-customer-heading">
                     <strong>{{ row['customer_name'] or 'Kunde ohne Namen' }}</strong>
                 </div>
-                <span>
-                    {{ row['item_labels'] }} · {{ row['platform'] or 'Plattform offen' }}
-                </span>
+                <span>{{ row['platform'] or 'Plattform offen' }}</span>
                 <div class="order-items">
                     {% for item in row['items'] %}
                     <div class="order-line">

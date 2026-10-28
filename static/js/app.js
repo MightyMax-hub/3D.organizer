@@ -233,3 +233,48 @@ if (saleItems) {
     packaging.addEventListener('input', updateOrder);
     updateOrder();
 }
+
+const modelOverview = document.querySelector('[data-model-overview]');
+if (modelOverview) {
+    const header = modelOverview.querySelector('.data-head');
+    let activeSortKey = null;
+    let sortAscending = false;
+
+    header.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-sort-key]');
+        if (!button) return;
+
+        const { sortKey, sortType } = button.dataset;
+        if (sortKey === activeSortKey) sortAscending = !sortAscending;
+        else {
+            activeSortKey = sortKey;
+            sortAscending = false;
+        }
+
+        const rows = [...modelOverview.querySelectorAll('.data-row')];
+        const columnIndex = [...header.children].indexOf(button.parentElement);
+        const originalOrder = new Map(rows.map((row, index) => [row, index]));
+        rows.sort((a, b) => {
+            const valueA = a.children[columnIndex].dataset.sortValue;
+            const valueB = b.children[columnIndex].dataset.sortValue;
+            const comparison = sortType === 'number'
+                ? Number(valueA) - Number(valueB)
+                : valueA.localeCompare(valueB, 'de', { numeric: true, sensitivity: 'base' });
+            return (sortAscending ? comparison : -comparison) || originalOrder.get(a) - originalOrder.get(b);
+        });
+        rows.forEach((row) => modelOverview.append(row));
+
+        header.querySelectorAll('[data-sort-key]').forEach((sortButton) => {
+            const isActive = sortButton === button;
+            sortButton.querySelector('.sort-indicator').textContent = isActive
+                ? (sortAscending ? '↑' : '↓')
+                : '';
+            sortButton.setAttribute(
+                'aria-label',
+                isActive
+                    ? `Nach ${sortButton.dataset.sortLabel} ${sortAscending ? 'aufsteigend' : 'absteigend'} sortiert`
+                    : `Nach ${sortButton.dataset.sortLabel} sortieren`
+            );
+        });
+    });
+}
